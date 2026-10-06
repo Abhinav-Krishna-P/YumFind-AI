@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #14080c;
+  --color-chili: #ff3d2e;
+  --color-mango: #ffb703;
+  --color-cream: #fff6e8;
+  --color-lime: #c6f54a;
+  --color-grape: #7c5cff;
+  --font-sans: "Outfit", sans-serif;
+  --font-display: "Fraunces", serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #fafafa;
+  color: #18181b;
+}
+
+.you-pin {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #18181b;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.place-pin {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid #d4d4d8;
+  border-radius: 999px;
+  background: #fff;
+  color: #18181b;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+}
+
+.place-pin.selected {
+  border-color: #18181b;
+  background: #18181b;
+  color: #fff;
+}
+
+.map-shell.maplibregl-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.map-shell .maplibregl-canvas-container,
+.map-shell .maplibregl-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.map-shell .maplibregl-ctrl-bottom-right {
+  bottom: 7.5rem;
+  right: 0.75rem;
+}

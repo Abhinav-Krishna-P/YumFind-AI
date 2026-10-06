@@ -1,0 +1,13 @@
+{
+  "name": "yumfindai",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n server,client -c red,blue \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "typecheck": "npm run typecheck --prefix server && npm run typecheck --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
