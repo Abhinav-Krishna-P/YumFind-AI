@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { stream } from 'hono/streaming';
 import { runFollowUpAgent, runSearchAgent, type AgentEvent } from './agent.js';
+import { clearChat, forget, loadChat, loadMemory } from './chat.js';
+import { kvBackend } from './kv.js';
 import { env } from './env.js';
 import { validCoord } from './geo.js';
 import { askFollowUp, cleanLists, findFood, findNearby } from './pipeline.js';
@@ -29,13 +31,14 @@ app.onError((error, c) => {
   return c.json({ error: 'Search is unavailable' }, 500);
 });
 
-app.get('/api/health', (c) =>
+app.get('/api/health', async (c) =>
   c.json({
     ok: true,
     serp: Boolean(env.serp),
     gemini: Boolean(env.gemini),
     jev: false,
     supabase: Boolean(env.supabaseUrl && env.supabaseKey),
+    cache: await kvBackend(),
   }),
 );
 
@@ -156,6 +159,23 @@ app.post('/api/agent/followup', async (c) => {
   return streamAgent(c, (emit) => runFollowUpAgent(user, input, emit));
 });
 
+// Chat history and taste memory for one result set ("Ask about these"), stored in Redis.
+app.get('/api/agent/chat', async (c) => {
+  const user = await actor(c);
+  const fingerprint = c.req.query('fingerprint') || '';
+  if (!fingerprint) throw new HttpError(400, 'Missing search');
+  const [messages, memory, store] = await Promise.all([loadChat(user.userId, fingerprint), loadMemory(user.userId), kvBackend()]);
+  return c.json({ messages, memory, store });
+});
+
+app.delete('/api/agent/chat', async (c) => {
+  const user = await actor(c);
+  const fingerprint = c.req.query('fingerprint') || '';
+  if (fingerprint) await clearChat(user.userId, fingerprint);
+  if (c.req.query('memory') === '1') await forget(user.userId);
+  return c.json({ ok: true });
+});
+
 app.post('/api/followup', async (c) => {
   const user = await actor(c);
   const body = await c.req.json<{ fingerprint?: string; question?: string }>();
@@ -181,8 +201,8 @@ app.post('/api/directions', async (c) => {
   );
 });
 
+// Public: Home asks "where am I?" before anyone signs in. Cached per ~150 m and throttled in reverse.ts.
 app.post('/api/where', async (c) => {
-  await actor(c);
   const body = await c.req.json<{ lat?: number; lng?: number }>();
   const lat = Number(body.lat);
   const lng = Number(body.lng);

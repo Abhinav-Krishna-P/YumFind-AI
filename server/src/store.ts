@@ -238,6 +238,48 @@ export async function readNearbyStore(actor: Actor, geohash: string) {
   return places;
 }
 
+const REVIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const REVIEW_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Reviews already fetched for these places within the last 7 days, keyed by data_id.
+ * Lets the agent skip a google_maps_reviews call for places another search already read.
+ */
+export async function readFreshReviews(actor: Actor, dataIds: string[]) {
+  const found = new Map<string, Review[]>();
+  const db = clientFor(actor.jwt);
+  if (!db || !dataIds.length) return found;
+  const { data: places, error } = await db
+    .from('places')
+    .select('id, data_id')
+    .in('data_id', dataIds)
+    .gt('reviews_cached_at', new Date(Date.now() - REVIEW_TTL_MS).toISOString());
+  log('fresh places', error);
+  if (!places?.length) return found;
+  const byId = new Map(places.map((row) => [String(row.id), String(row.data_id)]));
+  const { data: rows, error: reviewError } = await db
+    .from('place_reviews')
+    .select('place_id, source_review_id, author, rating, snippet, published_at')
+    .in('place_id', [...byId.keys()])
+    .gt('published_at', new Date(Date.now() - REVIEW_WINDOW_MS).toISOString())
+    .order('published_at', { ascending: false });
+  log('fresh reviews', reviewError);
+  for (const row of rows || []) {
+    const dataId = byId.get(String(row.place_id));
+    if (!dataId) continue;
+    const list = found.get(dataId) || [];
+    list.push({
+      sourceId: row.source_review_id,
+      author: row.author,
+      rating: row.rating == null ? null : Number(row.rating),
+      snippet: row.snippet,
+      publishedAt: row.published_at,
+    });
+    found.set(dataId, list);
+  }
+  return found;
+}
+
 export async function readSearchStore(actor: Actor, fingerprint: string) {
   const memory = readSearchMemory(fingerprint);
   if (memory) return memory;

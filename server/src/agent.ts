@@ -1,20 +1,33 @@
 import { toolTurn, type Content, type FunctionDeclaration, type Part, type Usage } from './gemini.js';
 import { dishQuery, fingerprint, haversine } from './geo.js';
+import { ANSWER_TTL, answerKey, appendChat, chatContext, learn, loadChat, loadMemory, messageId, type ChatMessage } from './chat.js';
+import { kvGet, kvSet } from './kv.js';
 import { embedLater, present } from './pipeline.js';
-import { fallbackPoints } from './rank.js';
-import { cravingPlaces, drivingRoute, reviewPages, webSearch, type SerpPlace } from './serp.js';
-import { readSearchStore, recordSearch, rememberSearch, savePlaces, saveSearchSnapshot } from './store.js';
+import { FOLLOWUP_SYSTEM, FOLLOWUP_TOOLS, PROMPT_VERSION, SEARCH_SYSTEM, SEARCH_TOOLS, followupTask, searchTask } from './prompts.js';
+import { fallbackPoints, preScore } from './rank.js';
+import { normalize } from './memory.js';
+import { cravingPlaces, drivingRoute, reviewPages, webSearch, type SerpPlace, type WebHit } from './serp.js';
+import { readFreshReviews, readSearchStore, recordSearch, rememberSearch, savePlaces, saveSearchSnapshot } from './store.js';
 import { assertHospitality } from './topic.js';
 import { HttpError, type Actor, type Place, type Review, type TraceStep } from './types.js';
 
 /*
  * YumFindAI as an agent. Gemini decides which SerpApi engines to call and when:
  *   search_places   -> engine=google_maps          (can change radius / open-now / min rating itself)
- *   read_reviews    -> engine=google_maps_reviews  (newest first, can page deeper for one place)
+ *   read_reviews    -> engine=google_maps_reviews  (newest first, several places in parallel, can page deeper)
  *   web_search      -> engine=google               (local food blogs, "best X in Y" lists)
  *   get_directions  -> engine=google_maps_directions
  *   finish          -> the ranked answer, with a verdict per place drawn only from what it read
  * Every tool call carries a `why` sentence that the map shows live as the agent works.
+ *
+ * Keeping it cheap:
+ *   - The context stays flat: every tool result carries a compact CANDIDATES table (the agent's memory),
+ *     and older tool results shrink to one-line briefs, so turn 8 costs about what turn 2 does.
+ *   - Reviews are relevance-ranked against the craving (or the question) and clipped before the model sees them.
+ *   - Reviews another search fetched in the last 7 days come from Supabase instead of SerpApi.
+ *   - Tool calls the model makes in the same step run in parallel.
+ *   - Follow-ups are a chat: history, taste memory and answers live in Redis (chat.ts), and only the last
+ *     few exchanges reach the model, as one short line each.
  */
 
 export type AgentEvent =
@@ -26,14 +39,27 @@ export type AgentEvent =
 
 export type Emit = (event: AgentEvent) => void;
 
+/** What one agent run cost, returned to the client and logged. */
+export type RunUsage = {
+  cacheHit: boolean;
+  turns: number;
+  serpCalls: number;
+  promptTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+};
+
 type Candidate = {
   key: string;
   serp: SerpPlace | null;
   place: Place;
   nextToken: string | null;
   reviewsRead: boolean;
+  /** Reviews came from storage, so there is no SerpApi page token yet. */
+  fromCache: boolean;
   route: { distance: string | null; duration: string | null } | null;
-  webMentions: string[];
+  webMentions: number;
 };
 
 type State = {
@@ -41,36 +67,34 @@ type State = {
   user: { lat: number; lng: number };
   radiusM: number;
   dish: string;
+  /** Word skeletons reviews are ranked against: dish + preferences, or the follow-up question. */
+  focus: Set<string>;
+  dishFocus: Set<string>;
   candidates: Map<string, Candidate>;
   serpCalls: number;
   serpCap: number;
+  searches: number;
   stepId: number;
   trace: TraceStep[];
   emit: Emit;
   usage: Usage & { turns: number };
 };
 
-const MAX_TURNS = 10;
+type ToolResult = { response: Record<string, unknown>; brief: Record<string, unknown> };
+type FunctionCallPart = Extract<Part, { functionCall: unknown }>;
+type FunctionResponsePart = Extract<Part, { functionResponse: unknown }>;
 
-function freshUsage() {
-  return { turns: 0, prompt: 0, cached: 0, output: 0, thoughts: 0 };
-}
+const MAX_TURNS = 8;
+const MAX_SEARCHES = 3;
+const DAY = 86_400_000;
+const BUDGET_GONE = { error: 'SerpApi budget for this run is used up. Finish with the evidence in CANDIDATES.' };
+const STOP = new Set([
+  'the', 'and', 'for', 'are', 'was', 'with', 'which', 'what', 'where', 'when', 'that', 'this', 'there', 'they', 'them',
+  'have', 'has', 'from', 'your', 'about', 'than', 'more', 'less', 'most', 'best', 'good', 'place', 'places', 'one',
+  'food', 'near', 'nearby', 'some', 'any', 'how', 'who', 'can', 'get', 'out', 'very', 'really', 'also',
+]);
 
-function addUsage(state: State, usage: Usage) {
-  state.usage.turns += 1;
-  state.usage.prompt += usage.prompt;
-  state.usage.cached += usage.cached;
-  state.usage.output += usage.output;
-  state.usage.thoughts += usage.thoughts;
-}
-
-function logUsage(label: string, state: State) {
-  const u = state.usage;
-  const cachedPct = u.prompt ? Math.round((u.cached / u.prompt) * 100) : 0;
-  console.log(
-    `[agent] ${label}: ${u.turns} turns, ${state.serpCalls} SerpApi calls, prompt ${u.prompt} tok (${cachedPct}% cached), output ${u.output}, thinking ${u.thoughts}`,
-  );
-}
+// ---- Small helpers ----------------------------------------------------------------------------
 
 function clamp(value: unknown, max: number) {
   const number = typeof value === 'number' && Number.isFinite(value) ? value : Number(value);
@@ -80,6 +104,66 @@ function clamp(value: unknown, max: number) {
 function distLabel(meters: number | null) {
   if (meters == null) return 'unknown distance';
   return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+
+function clip(text: string, max: number) {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+/** Drops keys that carry no information so the model is not sent them. */
+function compact(row: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(row).filter(([, value]) => value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && !value.length)),
+  );
+}
+
+/** "biryani" ~ "biriyani" ~ "biriyaani": words compared by consonant skeleton so local spellings still match. */
+function skeleton(word: string) {
+  return word.toLowerCase().replace(/[^a-z]/g, '').replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
+}
+
+function focusWords(...texts: string[]) {
+  const words = new Set<string>();
+  for (const text of texts) {
+    for (const raw of text.toLowerCase().split(/[^a-z]+/)) {
+      if (raw.length < 3 || STOP.has(raw)) continue;
+      const sk = skeleton(raw);
+      if (sk.length >= 2) words.add(sk);
+    }
+  }
+  return words;
+}
+
+function hits(text: string, focus: Set<string>) {
+  if (!focus.size) return 0;
+  const seen = new Set<string>();
+  for (const raw of text.split(/[^A-Za-z]+/)) {
+    const sk = skeleton(raw);
+    if (focus.has(sk)) seen.add(sk);
+  }
+  return seen.size;
+}
+
+function ageDays(review: Review) {
+  return Math.max(0, Math.round((Date.now() - new Date(review.publishedAt).getTime()) / DAY));
+}
+
+/** Most relevant reviews first (by focus words), newest first among equals. */
+function relevant(reviews: Review[], focus: Set<string>, n: number) {
+  return reviews
+    .map((review) => ({ review, score: hits(review.snippet, focus) }))
+    .sort((a, b) => b.score - a.score || b.review.publishedAt.localeCompare(a.review.publishedAt))
+    .slice(0, n)
+    .map(({ review }) => review);
+}
+
+function reviewLines(reviews: Review[], focus: Set<string>, n: number, max: number) {
+  return relevant(reviews, focus, n).map((review) => compact({ age_days: ageDays(review), rating: review.rating, text: clip(review.snippet, max) }));
+}
+
+function mentions(candidate: Candidate, state: State) {
+  return candidate.place.reviews.filter((review) => hits(review.snippet, state.dishFocus) > 0).length;
 }
 
 function toPlace(serp: SerpPlace, user: { lat: number; lng: number }): Place {
@@ -112,130 +196,40 @@ function reviewWithFor(candidate: Candidate) {
   return dataId.startsWith('pid:') ? { place_id: dataId.slice(4) } : { data_id: dataId };
 }
 
-function briefPlace(candidate: Candidate) {
-  const place = candidate.place;
-  return {
-    place_id: candidate.key,
-    name: place.name,
-    rating: place.rating,
-    review_count: place.reviewsCount,
-    price_level: place.priceLevel,
-    distance: distLabel(place.distanceM),
-    open_now: place.openNow,
-    reviews_read: candidate.reviewsRead ? place.reviews.length : 0,
-  };
+function setEvidence(candidate: Candidate, state: State) {
+  candidate.place.evidence = relevant(candidate.place.reviews, state.focus, 3).map((review) => ({ text: review.snippet, publishedAt: review.publishedAt }));
 }
 
-function briefReviews(reviews: Review[]) {
-  return reviews.slice(0, 12).map((review) => ({
-    date: review.publishedAt.slice(0, 10),
-    rating: review.rating,
-    text: review.snippet.slice(0, 280),
-  }));
+/** The agent's working memory, attached to the newest tool result each turn. */
+function sheet(state: State, lastStep: boolean) {
+  const order = (candidate: Candidate) =>
+    preScore({ distanceM: candidate.place.distanceM ?? state.radiusM, rating: candidate.place.rating }, state.radiusM);
+  const rows = [...state.candidates.values()]
+    .sort((a, b) => Number(b.reviewsRead) - Number(a.reviewsRead) || order(b) - order(a))
+    .slice(0, 10)
+    .map((candidate) =>
+      compact({
+        place_id: candidate.key,
+        name: candidate.place.name,
+        rating: candidate.place.rating,
+        reviews_total: candidate.place.reviewsCount,
+        price: candidate.place.priceLevel,
+        distance: distLabel(candidate.place.distanceM),
+        closed: candidate.place.openNow === false ? true : undefined,
+        read: candidate.reviewsRead ? candidate.place.reviews.length : undefined,
+        dish_mentions: candidate.reviewsRead && state.dishFocus.size ? mentions(candidate, state) : undefined,
+        evidence: candidate.reviewsRead ? relevant(candidate.place.reviews, state.focus, 2).map((review) => clip(review.snippet, 150)) : undefined,
+        web_mentions: candidate.webMentions || undefined,
+        drive: candidate.route?.duration ?? undefined,
+        more_pages: candidate.nextToken ? true : undefined,
+      }),
+    );
+  return compact({
+    serp_budget_left: state.serpCap - state.serpCalls,
+    places: rows,
+    note: lastStep ? 'Last step: finish now.' : undefined,
+  });
 }
-
-// ---- Tool declarations -----------------------------------------------------------------------
-
-const WHY = {
-  type: 'STRING',
-  description: 'One short present-tense sentence shown to the user, e.g. "Searching Google Maps for chicken biryani within 2 km".',
-};
-
-const SEARCH_TOOLS: FunctionDeclaration[] = [
-  {
-    name: 'search_places',
-    description:
-      'Search Google Maps (SerpApi engine=google_maps) around the user. Returns open restaurants with rating, price, distance. Change radius_m or the query to widen or refine. Results outside radius_m are dropped.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        query: { type: 'STRING', description: 'Dish, cuisine or venue type, e.g. "chicken biryani" or "mandi".' },
-        radius_m: { type: 'INTEGER', description: 'One of 1000, 2000, 5000, 10000.' },
-        open_now: { type: 'BOOLEAN', description: 'Only places open right now. Default true.' },
-        min_rating: { type: 'NUMBER', description: 'Optional minimum Google rating, e.g. 4.0.' },
-        why: WHY,
-      },
-      required: ['query', 'radius_m', 'why'],
-    },
-  },
-  {
-    name: 'read_reviews',
-    description:
-      'Read the newest Google reviews from the last 3 months (SerpApi engine=google_maps_reviews). Pass several place_ids at once; they are fetched in parallel. Call with more=true to read the next page for places whose reviews did not mention the dish yet.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        place_ids: { type: 'ARRAY', items: { type: 'STRING' }, description: 'place_ids returned by search_places. Usually 3 to 5 at once.' },
-        more: { type: 'BOOLEAN', description: 'Read the next page instead of the first.' },
-        why: WHY,
-      },
-      required: ['place_ids', 'why'],
-    },
-  },
-  {
-    name: 'web_search',
-    description:
-      'Google web search (SerpApi engine=google). Use to cross-check candidates against local food blogs, news and "best X in <area>" lists, or to find the local name of a dish.',
-    parameters: {
-      type: 'OBJECT',
-      properties: { query: { type: 'STRING' }, why: WHY },
-      required: ['query', 'why'],
-    },
-  },
-  {
-    name: 'get_directions',
-    description: 'Driving time and distance from the user to one place (SerpApi engine=google_maps_directions). Use when the user cares about speed or closeness.',
-    parameters: {
-      type: 'OBJECT',
-      properties: { place_id: { type: 'STRING' }, why: WHY },
-      required: ['place_id', 'why'],
-    },
-  },
-  {
-    name: 'finish',
-    description: 'Return the final ranked answer. Only include places whose reviews you read. Rank 1 is best.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        headline: { type: 'STRING', description: 'Max 8 words. States the finding, e.g. "Two spots reviewers trust for biryani".' },
-        reason: { type: 'STRING', description: 'Max 24 words. What the recent reviews actually say, and what you checked.' },
-        ranked: {
-          type: 'ARRAY',
-          items: {
-            type: 'OBJECT',
-            properties: {
-              place_id: { type: 'STRING' },
-              verdict: { type: 'STRING', description: 'Max 22 words, from the reviews you read. If they do not mention the dish, say so.' },
-              review_support: { type: 'INTEGER', description: '0-30. How strongly recent reviews support the craving and preferences.' },
-            },
-            required: ['place_id', 'verdict', 'review_support'],
-          },
-        },
-      },
-      required: ['headline', 'reason', 'ranked'],
-    },
-  },
-];
-
-const FOLLOWUP_TOOLS: FunctionDeclaration[] = [
-  SEARCH_TOOLS[1],
-  SEARCH_TOOLS[2],
-  SEARCH_TOOLS[3],
-  {
-    name: 'finish_answer',
-    description: 'Answer the follow-up from the evidence gathered. Point at one place when the question asks for a pick.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        headline: { type: 'STRING', description: 'Max 8 words.' },
-        reason: { type: 'STRING', description: 'Max 24 words. The evidence, not a formula.' },
-        place_id: { type: 'STRING', description: 'The chosen place_id, or omit when no single place answers it.' },
-        verdict: { type: 'STRING', description: 'Max 22 words about the chosen place. Omit when place_id is omitted.' },
-      },
-      required: ['headline', 'reason'],
-    },
-  },
-];
 
 // ---- Tool execution ---------------------------------------------------------------------------
 
@@ -254,20 +248,23 @@ function spend(state: State) {
   return true;
 }
 
-const BUDGET_GONE = { error: 'SerpApi budget for this search is used up. Call finish now with the evidence you already have.' };
-
-function emitPlaces(state: State) {
-  const places = [...state.candidates.values()].map((candidate) => present(candidate.place));
-  state.emit({ type: 'places', places });
+function same(response: Record<string, unknown>): ToolResult {
+  return { response, brief: response };
 }
 
-async function execSearch(state: State, args: Record<string, unknown>) {
+function emitPlaces(state: State) {
+  state.emit({ type: 'places', places: [...state.candidates.values()].map((candidate) => present(candidate.place)) });
+}
+
+async function execSearch(state: State, args: Record<string, unknown>): Promise<ToolResult> {
   const query = String(args.query || state.dish).trim() || state.dish;
   const radiusM = [1000, 2000, 5000, 10000].includes(Number(args.radius_m)) ? Number(args.radius_m) : state.radiusM;
+  if (state.searches >= MAX_SEARCHES) return same({ error: `Search limit reached (${MAX_SEARCHES}). Read reviews for CANDIDATES or finish.` });
+  state.searches += 1;
   const done = step(state, 'search_places', String(args.why || `Searching Google Maps for ${query}`));
   if (!spend(state)) {
     done('Skipped: budget used up');
-    return BUDGET_GONE;
+    return same(BUDGET_GONE);
   }
   let found: SerpPlace[] = [];
   try {
@@ -284,142 +281,152 @@ async function execSearch(state: State, args: Record<string, unknown>) {
     );
   } catch (error) {
     done('Google Maps search failed');
-    return { error: error instanceof Error ? error.message : 'search failed' };
+    return same({ error: error instanceof Error ? error.message : 'search failed' });
   }
   state.radiusM = Math.max(state.radiusM, radiusM);
-  const fresh: Candidate[] = [];
+  let fresh = 0;
   for (const serp of found) {
     const place = toPlace(serp, state.user);
     if ((place.distanceM ?? Infinity) > radiusM) continue;
-    const existing = [...state.candidates.values()].find((candidate) => candidate.place.dataId === serp.dataId);
-    if (existing) continue;
+    if ([...state.candidates.values()].some((candidate) => candidate.place.dataId === serp.dataId)) continue;
     const key = `p${state.candidates.size + 1}`;
-    const candidate: Candidate = { key, serp, place, nextToken: null, reviewsRead: false, route: null, webMentions: [] };
-    state.candidates.set(key, candidate);
-    fresh.push(candidate);
+    state.candidates.set(key, { key, serp, place, nextToken: null, reviewsRead: false, fromCache: false, route: null, webMentions: 0 });
+    fresh += 1;
   }
-  const inRadius = [...state.candidates.values()].filter((candidate) => (candidate.place.distanceM ?? Infinity) <= radiusM);
-  done(`${found.length} results, ${inRadius.length} within ${distLabel(radiusM)}${fresh.length ? `, ${fresh.length} new` : ''}`);
-  if (fresh.length) emitPlaces(state);
+  const inRadius = [...state.candidates.values()].filter((candidate) => (candidate.place.distanceM ?? Infinity) <= radiusM).length;
+  done(`${found.length} results, ${inRadius} within ${distLabel(radiusM)}${fresh ? `, ${fresh} new` : ''}`);
+  if (fresh) emitPlaces(state);
   return {
-    query,
-    radius_m: radiusM,
-    new_places: fresh.length,
-    places: inRadius.sort((a, b) => (a.place.distanceM ?? 0) - (b.place.distanceM ?? 0)).map(briefPlace),
+    response: { query, radius_m: radiusM, results: found.length, in_radius: inRadius, new_places: fresh },
+    brief: { query, radius_m: radiusM, new_places: fresh },
   };
 }
 
-/** "biryani" ~ "biriyani" ~ "biriyaani": compare words by consonant skeleton so local spellings count as a mention. */
-function skeleton(word: string) {
-  return word.toLowerCase().replace(/[^a-z]/g, '').replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
-}
-
-function mentionsDish(text: string, dish: string) {
-  const wanted = dish.split(/\s+/).filter((word) => word.length >= 4).map(skeleton).filter(Boolean);
-  if (!wanted.length) return false;
-  const words = new Set(text.split(/[^A-Za-z]+/).map(skeleton).filter(Boolean));
-  return wanted.some((want) => words.has(want));
-}
-
-async function readOne(state: State, candidate: Candidate, more: boolean) {
-  if (more && !candidate.nextToken) {
-    return { place_id: candidate.key, name: candidate.place.name, reviews: [], note: 'No more reviews from the last 3 months.', added: 0 };
+async function readOne(state: State, candidate: Candidate, more: boolean, justCached: boolean) {
+  const base = { place_id: candidate.key, name: candidate.place.name };
+  if (justCached) {
+    return { row: { ...base, reviews: reviewLines(candidate.place.reviews, state.focus, 6, 220), from_cache: true }, added: candidate.place.reviews.length };
   }
-  if (!more && candidate.reviewsRead) {
-    return { place_id: candidate.key, name: candidate.place.name, reviews: briefReviews(candidate.place.reviews), note: 'Already read; shown again.', added: 0 };
-  }
-  if (!spend(state)) return { place_id: candidate.key, name: candidate.place.name, ...BUDGET_GONE, added: 0 };
+  if (!more && candidate.reviewsRead) return { row: { ...base, note: 'Already read; see CANDIDATES.' }, added: 0 };
+  if (more && !candidate.nextToken && !candidate.fromCache) return { row: { ...base, note: 'No more reviews from the last 3 months.' }, added: 0 };
+  if (!spend(state)) return { row: { ...base, ...BUDGET_GONE }, added: 0 };
   try {
-    const result = await reviewPages(reviewWithFor(candidate), AbortSignal.timeout(20000), {
-      maxPages: 1,
-      startToken: more ? candidate.nextToken || undefined : undefined,
-    });
+    // Stored reviews have no page token, so a deeper read starts at page one and skips what is known.
+    const startToken = more && !candidate.fromCache ? candidate.nextToken || undefined : undefined;
+    const result = await reviewPages(reviewWithFor(candidate), AbortSignal.timeout(20000), { maxPages: 1, startToken });
     const seen = new Set(candidate.place.reviews.map((review) => review.sourceId));
     const added = result.reviews.filter((review) => !seen.has(review.sourceId));
     candidate.place.reviews = [...candidate.place.reviews, ...added];
-    candidate.place.evidence = candidate.place.reviews.slice(0, 3).map((review) => ({ text: review.snippet, publishedAt: review.publishedAt }));
     candidate.nextToken = result.nextToken;
     candidate.reviewsRead = true;
+    candidate.fromCache = false;
+    setEvidence(candidate, state);
     return {
-      place_id: candidate.key,
-      name: candidate.place.name,
-      reviews: briefReviews(added),
-      more_available: Boolean(result.nextToken),
+      row: compact({ ...base, reviews: reviewLines(added, state.focus, 6, 220), more_available: result.nextToken ? true : undefined }),
       added: added.length,
     };
   } catch (error) {
-    return { place_id: candidate.key, name: candidate.place.name, error: error instanceof Error ? error.message : 'reviews failed', added: 0 };
+    return { row: { ...base, error: error instanceof Error ? error.message : 'reviews failed' }, added: 0 };
   }
 }
 
-async function execReviews(state: State, args: Record<string, unknown>) {
+async function execReviews(state: State, args: Record<string, unknown>): Promise<ToolResult> {
   const ids = Array.isArray(args.place_ids) ? args.place_ids.map(String) : args.place_id ? [String(args.place_id)] : [];
   const picked = ids.map((id) => state.candidates.get(id)).filter((candidate): candidate is Candidate => Boolean(candidate)).slice(0, 6);
-  if (!picked.length) return { error: 'No known place_ids given. Use ids from search_places.' };
+  if (!picked.length) return same({ error: 'No known place_ids given. Use ids from CANDIDATES.' });
   const more = args.more === true;
   const names = picked.map((candidate) => candidate.place.name);
   const label = names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
   const done = step(state, 'read_reviews', String(args.why || `Reading recent Google reviews for ${label}`));
-  const results = await Promise.all(picked.map((candidate) => readOne(state, candidate, more && candidate.reviewsRead)));
-  const added = results.reduce((sum, row) => sum + row.added, 0);
-  const mentioning = picked.filter((candidate) => candidate.place.reviews.some((review) => mentionsDish(review.snippet, state.dish))).length;
+
+  // Reviews another search fetched this week cost no SerpApi call.
+  const unread = picked.filter((candidate) => !candidate.reviewsRead);
+  const stored = unread.length
+    ? await readFreshReviews(state.actor, unread.map((candidate) => candidate.place.dataId)).catch(() => new Map<string, Review[]>())
+    : new Map<string, Review[]>();
+  const justCached = new Set<Candidate>();
+  for (const candidate of unread) {
+    const reviews = stored.get(candidate.place.dataId);
+    if (!reviews?.length) continue;
+    candidate.place.reviews = reviews;
+    candidate.reviewsRead = true;
+    candidate.fromCache = true;
+    candidate.nextToken = null;
+    setEvidence(candidate, state);
+    justCached.add(candidate);
+  }
+
+  const results = await Promise.all(
+    picked.map((candidate) => readOne(state, candidate, more && candidate.reviewsRead && !justCached.has(candidate), justCached.has(candidate))),
+  );
+  const added = results.reduce((sum, result) => sum + result.added, 0);
   const where = picked.length === 1 ? picked[0].place.name : `${picked.length} places`;
-  done(state.dish ? `${added} recent reviews across ${where}; ${mentioning} mention the dish` : `${added} more recent reviews for ${where}`);
-  return { places: results.map(({ added: _added, ...row }) => row) };
+  const cachedNote = justCached.size ? ` (${justCached.size} from cache)` : '';
+  if (state.dishFocus.size) {
+    const mentioning = picked.filter((candidate) => mentions(candidate, state) > 0).length;
+    done(`${added} recent reviews across ${where}${cachedNote}; ${mentioning} mention the dish`);
+  } else {
+    done(`${added} more recent reviews for ${where}${cachedNote}`);
+  }
+  return {
+    response: { places: results.map((result) => result.row) },
+    brief: { read: picked.map((candidate) => candidate.key) },
+  };
 }
 
-async function execWeb(state: State, args: Record<string, unknown>) {
+async function execWeb(state: State, args: Record<string, unknown>): Promise<ToolResult> {
   const query = String(args.query || '').trim();
-  if (!query) return { error: 'query is required' };
+  if (!query) return same({ error: 'query is required' });
   const done = step(state, 'web_search', String(args.why || `Searching the web for ${query}`));
   if (!spend(state)) {
     done('Skipped: budget used up');
-    return BUDGET_GONE;
+    return same(BUDGET_GONE);
   }
   try {
-    const hits = await webSearch(query, AbortSignal.timeout(20000));
+    // The same web query is answered from Redis for a day, so a repeat costs nothing.
+    const cacheKey = `web:${normalize(query)}`;
+    const found = (await kvGet<WebHit[]>(cacheKey)) ?? (await webSearch(query, AbortSignal.timeout(8000)));
+    void kvSet(cacheKey, found, 24 * 60 * 60).catch(() => undefined);
     for (const candidate of state.candidates.values()) {
       const name = candidate.place.name.toLowerCase();
-      for (const hit of hits) {
-        if (`${hit.title} ${hit.snippet}`.toLowerCase().includes(name)) candidate.webMentions.push(hit.title);
-      }
+      candidate.webMentions += found.filter((hit) => `${hit.title} ${hit.snippet}`.toLowerCase().includes(name)).length;
     }
-    const mentioned = [...state.candidates.values()].filter((candidate) => candidate.webMentions.length).map((candidate) => candidate.key);
-    done(`${hits.length} results${mentioned.length ? `, mentions ${mentioned.length} of your candidates` : ''}`);
+    const mentioned = [...state.candidates.values()].filter((candidate) => candidate.webMentions).map((candidate) => candidate.key);
+    done(`${found.length} results${mentioned.length ? `, mentions ${mentioned.length} of the candidates` : ''}`);
     return {
-      results: hits.map((hit) => ({ title: hit.title, snippet: hit.snippet })),
-      candidates_mentioned: mentioned,
+      response: { results: found.slice(0, 6).map((hit) => ({ title: clip(hit.title, 90), snippet: clip(hit.snippet, 160) })), candidates_mentioned: mentioned },
+      brief: { query, candidates_mentioned: mentioned },
     };
   } catch (error) {
     done('Web search failed');
-    return { error: error instanceof Error ? error.message : 'web search failed' };
+    return same({ error: error instanceof Error ? error.message : 'web search failed' });
   }
 }
 
-async function execDirections(state: State, args: Record<string, unknown>) {
+async function execDirections(state: State, args: Record<string, unknown>): Promise<ToolResult> {
   const candidate = state.candidates.get(String(args.place_id));
-  if (!candidate) return { error: `Unknown place_id ${String(args.place_id)}` };
+  if (!candidate) return same({ error: `Unknown place_id ${String(args.place_id)}` });
   const done = step(state, 'get_directions', String(args.why || `Checking the drive to ${candidate.place.name}`));
   if (candidate.route) {
     done(`${candidate.route.duration || '?'} · ${candidate.route.distance || '?'}`);
-    return { place_id: candidate.key, ...candidate.route };
+    return same({ place_id: candidate.key, ...candidate.route });
   }
   if (!spend(state)) {
     done('Skipped: budget used up');
-    return BUDGET_GONE;
+    return same(BUDGET_GONE);
   }
   try {
     const route = await drivingRoute(state.user, { lat: candidate.place.lat, lng: candidate.place.lng }, AbortSignal.timeout(12000));
     candidate.route = { distance: route.distance, duration: route.duration };
     done(`${route.duration || '?'} drive · ${route.distance || '?'}`);
-    return { place_id: candidate.key, duration: route.duration, distance: route.distance };
+    return same({ place_id: candidate.key, duration: route.duration, distance: route.distance });
   } catch (error) {
     done('Directions unavailable');
-    return { error: error instanceof Error ? error.message : 'directions failed' };
+    return same({ error: error instanceof Error ? error.message : 'directions failed' });
   }
 }
 
-async function execTool(state: State, name: string, args: Record<string, unknown>) {
+function execTool(state: State, name: string, args: Record<string, unknown>): Promise<ToolResult> {
   switch (name) {
     case 'search_places':
       return execSearch(state, args);
@@ -430,7 +437,7 @@ async function execTool(state: State, name: string, args: Record<string, unknown
     case 'get_directions':
       return execDirections(state, args);
     default:
-      return { error: `Unknown tool ${name}` };
+      return Promise.resolve(same({ error: `Unknown tool ${name}` }));
   }
 }
 
@@ -438,50 +445,92 @@ async function execTool(state: State, name: string, args: Record<string, unknown
 
 type Finish = Record<string, unknown> | null;
 
-/** Runs model turns until the model calls `finishTool`. Returns its args, or null when the model gave up. */
+/**
+ * Runs model turns until the model calls `finishTool`; returns its args, or null when the model gave up.
+ * Before each new turn, the previous tool results are swapped for their briefs. Only the response payloads
+ * change, never the model's own parts, so Gemini's thought signatures stay intact.
+ */
 async function runLoop(state: State, system: string, task: string, tools: FunctionDeclaration[], finishTool: string): Promise<Finish> {
   const contents: Content[] = [{ role: 'user', parts: [{ text: task }] }];
+  let pending: { part: FunctionResponsePart; brief: Record<string, unknown> }[] = [];
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
     const model = await toolTurn(system, contents, tools, { onUsage: (usage) => addUsage(state, usage) });
     if (!model) return null;
     contents.push(model);
-    const calls = model.parts.filter((part): part is Extract<Part, { functionCall: unknown }> => 'functionCall' in part);
+    const calls = model.parts.filter((part): part is FunctionCallPart => 'functionCall' in part);
     if (!calls.length) {
       contents.push({ role: 'user', parts: [{ text: `Use a tool, or call ${finishTool} with what you have.` }] });
       continue;
     }
-    const responses: Part[] = [];
-    for (const call of calls) {
-      const { name, args } = call.functionCall;
-      if (name === finishTool) return args || {};
-      const response = await execTool(state, name, args || {});
-      responses.push({ functionResponse: { name, response } });
-    }
-    contents.push({ role: 'user', parts: responses });
-    if (turn === MAX_TURNS - 2) {
-      contents.push({ role: 'user', parts: [{ text: `This is your last step. Call ${finishTool} now.` }] });
-    }
+    const finish = calls.find((call) => call.functionCall.name === finishTool);
+    if (finish) return finish.functionCall.args || {};
+
+    for (const { part, brief } of pending) part.functionResponse.response = brief;
+    const results = await Promise.all(calls.map((call) => execTool(state, call.functionCall.name, call.functionCall.args || {})));
+    const parts: FunctionResponsePart[] = results.map((result, index) => ({
+      functionResponse: { name: calls[index].functionCall.name, response: result.response },
+    }));
+    const last = parts[parts.length - 1];
+    last.functionResponse.response = { ...last.functionResponse.response, CANDIDATES: sheet(state, turn >= MAX_TURNS - 2) };
+    contents.push({ role: 'user', parts });
+    pending = parts.map((part, index) => ({ part, brief: results[index].brief }));
   }
   return null;
 }
 
+// ---- Usage ------------------------------------------------------------------------------------
+
+function freshUsage() {
+  return { turns: 0, prompt: 0, cached: 0, output: 0, thoughts: 0 };
+}
+
+function addUsage(state: State, usage: Usage) {
+  state.usage.turns += 1;
+  state.usage.prompt += usage.prompt;
+  state.usage.cached += usage.cached;
+  state.usage.output += usage.output;
+  state.usage.thoughts += usage.thoughts;
+}
+
+function report(state: State, label: string): RunUsage {
+  const u = state.usage;
+  const cachedPct = u.prompt ? Math.round((u.cached / u.prompt) * 100) : 0;
+  console.log(
+    `[agent ${PROMPT_VERSION}] ${label}: ${u.turns} turns, ${state.serpCalls} SerpApi calls, prompt ${u.prompt} tok (${cachedPct}% cached), output ${u.output}, thinking ${u.thoughts}`,
+  );
+  return {
+    cacheHit: false,
+    turns: u.turns,
+    serpCalls: state.serpCalls,
+    promptTokens: u.prompt,
+    cachedTokens: u.cached,
+    outputTokens: u.output,
+    thinkingTokens: u.thoughts,
+  };
+}
+
+const CACHED_RUN: RunUsage = { cacheHit: true, turns: 0, serpCalls: 0, promptTokens: 0, cachedTokens: 0, outputTokens: 0, thinkingTokens: 0 };
+
+function newState(actor: Actor, user: { lat: number; lng: number }, radiusM: number, emit: Emit, serpCap: number): State {
+  return {
+    actor,
+    user,
+    radiusM,
+    dish: '',
+    focus: new Set(),
+    dishFocus: new Set(),
+    candidates: new Map(),
+    serpCalls: 0,
+    serpCap,
+    searches: 0,
+    stepId: 0,
+    trace: [],
+    emit,
+    usage: freshUsage(),
+  };
+}
+
 // ---- Search -----------------------------------------------------------------------------------
-
-const SEARCH_SYSTEM = `You are YumFindAI, a food-finding agent. You find the best open places for one craving by calling SerpApi tools yourself, then rank them from evidence you actually read.
-
-How to work:
-1. Start with search_places using the user's craving and radius.
-2. Read reviews for the 3 to 5 most promising places (closest, best rated, open) in ONE read_reviews call with several place_ids. Prefer places whose recent reviews mention the dish.
-3. If fewer than 3 places are found, or reviews do not support the dish, widen the radius (2 km -> 5 km -> 10 km) or try the local name of the dish. One web_search for "best <dish> in <area>" is a good cross-check when candidates are many.
-4. Use read_reviews with more=true (several place_ids at once) when first pages never mention the dish.
-5. Use get_directions only if the user asked for quick, close, or walking distance.
-6. Call finish with 3 to 5 places (fewer only if that is all that exists). Only rank places whose reviews you read.
-
-Rules:
-- Never invent a restaurant, rating, price, distance or review. Verdicts quote what reviews from the last 3 months say. If they do not mention the dish, say that plainly.
-- Respect the user's preferences and add-ons; look for them in reviews (veg, spicy, family, parking, outdoor seating, pure veg).
-- Each tool call must include a short, specific "why" sentence for the user. Mention the engine in plain words: Google Maps, Google reviews, the web, directions.
-- Be efficient: you have a SerpApi budget of about 12 calls. Do not re-read reviews you already have.`;
 
 export async function runSearchAgent(
   actor: Actor,
@@ -498,36 +547,28 @@ export async function runSearchAgent(
   if (cached) {
     emit({ type: 'step', id: 1, tool: 'cache', say: 'Loading this search from memory', status: 'running' });
     await recordSearch(actor, { query: input.craving, lat: input.lat, lng: input.lng, radiusM: input.radiusM, budget: 'any', preferences: input.preferences, addons: input.addons, placeIds: cached.places.map((place) => place.id), cacheHit: true });
-    emit({ type: 'step', id: 1, tool: 'cache', say: 'Loading this search from memory', status: 'done', summary: `${cached.places.length} places, searched recently` });
-    const result = { cacheHit: true, fingerprint: key, headline: cached.headline, reason: cached.reason, places: cached.places.map(present), trace: cached.trace || [] };
+    emit({ type: 'step', id: 1, tool: 'cache', say: 'Loading this search from memory', status: 'done', summary: `${cached.places.length} places, searched recently; no new SerpApi calls` });
+    const result = { cacheHit: true, fingerprint: key, headline: cached.headline, reason: cached.reason, places: cached.places.map(present), trace: cached.trace || [], usage: CACHED_RUN };
     emit({ type: 'done', result });
     return result;
   }
 
-  const state: State = {
-    actor,
-    user: { lat: input.lat, lng: input.lng },
-    radiusM: input.radiusM,
+  const memory = await loadMemory(actor.userId);
+  void learn(actor.userId, [input.craving, ...input.preferences, ...input.addons].join(' ')).catch(() => undefined);
+  const state = newState(actor, { lat: input.lat, lng: input.lng }, input.radiusM, emit, 12);
+  state.dish = dish;
+  state.dishFocus = focusWords(dish);
+  state.focus = focusWords(dish, ...input.preferences, ...input.addons);
+  const task = searchTask({
+    craving: input.craving,
     dish,
-    candidates: new Map(),
-    serpCalls: 0,
-    serpCap: 12,
-    stepId: 0,
-    trace: [],
-    emit,
-    usage: freshUsage(),
-  };
-
-  const task = [
-    `Craving: "${input.craving}" (search term: "${dish}").`,
-    `User location: ${input.locationLabel || `${input.lat.toFixed(4)}, ${input.lng.toFixed(4)}`}.`,
-    `Radius chosen: ${distLabel(input.radiusM)}.`,
-    `Preferences: ${input.preferences.join(', ') || 'none'}. Add-ons wanted: ${input.addons.join(', ') || 'none'}.`,
-    wantsBest ? 'The user asked for the best, so prefer rating 4.0 and above.' : '',
-    'Find and rank the places. Begin.',
-  ]
-    .filter(Boolean)
-    .join('\n');
+    where: input.locationLabel || `${input.lat.toFixed(4)}, ${input.lng.toFixed(4)}`,
+    radius: distLabel(input.radiusM),
+    preferences: input.preferences,
+    addons: input.addons,
+    wantsBest,
+    memory,
+  });
 
   let finish = await runLoop(state, SEARCH_SYSTEM, task, SEARCH_TOOLS, 'finish').catch((error) => {
     console.error('[agent]', error instanceof Error ? error.message : error);
@@ -537,10 +578,11 @@ export async function runSearchAgent(
   // Gemini down or gave up: run the plan ourselves so the user still gets an honest ranking.
   if (!finish) {
     if (!state.candidates.size) await execSearch(state, { query: dish, radius_m: input.radiusM, why: `Searching Google Maps for ${dish} within ${distLabel(input.radiusM)}` });
+    const read = [...state.candidates.values()].filter((candidate) => candidate.reviewsRead).length;
     const top = [...state.candidates.values()]
       .filter((candidate) => !candidate.reviewsRead)
       .sort((a, b) => (b.place.rating ?? 0) - (a.place.rating ?? 0) || (a.place.distanceM ?? 0) - (b.place.distanceM ?? 0))
-      .slice(0, 5 - [...state.candidates.values()].filter((candidate) => candidate.reviewsRead).length);
+      .slice(0, Math.max(0, 5 - read));
     if (top.length) await execReviews(state, { place_ids: top.map((candidate) => candidate.key), why: 'Reading recent Google reviews for the top candidates' });
     finish = {
       headline: state.candidates.size ? 'Ranked from rating and distance' : 'No open match nearby',
@@ -565,6 +607,13 @@ export async function runSearchAgent(
   }
 
   const saved = await savePlaces(actor, ordered);
+  // Places that were read but not ranked still feed the review cache for the next search.
+  const extra = [...state.candidates.values()]
+    .filter((candidate) => candidate.reviewsRead && !candidate.fromCache && candidate.place.reviews.length)
+    .filter((candidate) => !ordered.some((place) => place.dataId === candidate.place.dataId))
+    .map((candidate) => candidate.place);
+  if (extra.length) void savePlaces(actor, extra).catch((error) => console.error('[cache] reviews', error instanceof Error ? error.message : error));
+
   const headline = String(finish.headline || (saved.length ? 'Review report' : 'No open match')).trim();
   const reason = String(finish.reason || (saved.length ? 'Built from reviews in the last 3 months.' : 'Try a wider radius.')).trim();
   const snapshot = { fingerprint: key, headline, reason, places: saved, expiresAt: Date.now() + 6 * 60 * 60 * 1000, trace: state.trace };
@@ -576,23 +625,25 @@ export async function runSearchAgent(
     new Promise((resolve) => setTimeout(resolve, 2500)),
   ]);
 
-  logUsage(`search "${input.craving}"`, state);
-  const result = { cacheHit: false, fingerprint: key, headline, reason, places: saved.map(present), trace: state.trace, serpCalls: state.serpCalls };
+  const usage = report(state, `search "${input.craving}"`);
+  const result = { cacheHit: false, fingerprint: key, headline, reason, places: saved.map(present), trace: state.trace, serpCalls: state.serpCalls, usage };
   emit({ type: 'done', result });
   return result;
 }
 
-// ---- Follow-up --------------------------------------------------------------------------------
+// ---- Follow-up chat ---------------------------------------------------------------------------
 
-const FOLLOWUP_SYSTEM = `You are YumFindAI, answering one follow-up question about places already on the user's map. You already hold their recent reviews. Answer from that evidence first.
+type FollowUpResult = {
+  answer: string;
+  headline: string;
+  reason: string;
+  placeId: string | null;
+  verdict: string | null;
+  trace: TraceStep[];
+  usage: RunUsage;
+};
 
-Use tools only when the stored reviews cannot answer:
-- read_reviews with more=true to read a deeper page for the places the question is about.
-- web_search for things reviews rarely say (opening hours changes, a chef, a news item).
-- get_directions when the question is about time to reach or which is closer by road.
-Then call finish_answer. Pick a single place_id when the question asks which one; otherwise omit it.
-Each tool call needs a short "why" sentence for the user. Budget: at most 4 tool calls. Never invent facts.`;
-
+/** One chat turn about a result set. Messages, taste memory and answers are kept in Redis via chat.ts. */
 export async function runFollowUpAgent(
   actor: Actor,
   input: { fingerprint: string; question: string; lat?: number; lng?: number },
@@ -602,37 +653,45 @@ export async function runFollowUpAgent(
   const snapshot = await readSearchStore(actor, input.fingerprint);
   if (!snapshot) throw new HttpError(404, 'Search again to refresh these places');
 
+  const [messages, memory] = await Promise.all([loadChat(actor.userId, input.fingerprint), loadMemory(actor.userId)]);
+  const asked: ChatMessage = { id: messageId(), role: 'user', text: input.question, at: Date.now() };
+  const key = answerKey(input.fingerprint, input.question, messages, memory);
+  const placeName = (id: string | null) => snapshot.places.find((place) => place.id === id)?.name ?? null;
+
+  const known = await kvGet<Omit<FollowUpResult, 'usage'>>(key);
+  if (known) {
+    emit({ type: 'step', id: 1, tool: 'cache', say: 'Answering from memory', status: 'running' });
+    emit({ type: 'step', id: 1, tool: 'cache', say: 'Answering from memory', status: 'done', summary: 'Asked before in this context; no new calls' });
+    const reply: ChatMessage = { id: messageId(), role: 'assistant', text: known.answer, at: Date.now(), placeId: known.placeId, placeName: placeName(known.placeId), cached: true };
+    await appendChat(actor.userId, input.fingerprint, [asked, reply]);
+    await learn(actor.userId, input.question).catch(() => undefined);
+    const result = { ...known, usage: CACHED_RUN, messages: [asked, reply], memory: await loadMemory(actor.userId) };
+    emit({ type: 'done', result });
+    return result;
+  }
+
   const first = snapshot.places[0];
   const user = input.lat != null && input.lng != null ? { lat: input.lat, lng: input.lng } : { lat: first?.lat ?? 0, lng: first?.lng ?? 0 };
-  const state: State = {
-    actor,
-    user,
-    radiusM: 10000,
-    dish: '',
-    candidates: new Map(),
-    serpCalls: 0,
-    serpCap: 4,
-    stepId: 0,
-    trace: [],
-    emit,
-    usage: freshUsage(),
-  };
+  const state = newState(actor, user, 10000, emit, 4);
+  state.focus = focusWords(input.question);
   snapshot.places.forEach((place, index) => {
-    const key = `p${index + 1}`;
-    state.candidates.set(key, { key, serp: null, place: { ...place }, nextToken: null, reviewsRead: true, route: null, webMentions: [] });
+    const id = `p${index + 1}`;
+    // Stored reviews: a deeper read can still fetch from SerpApi, starting at page one.
+    state.candidates.set(id, { key: id, serp: null, place: { ...place }, nextToken: null, reviewsRead: true, fromCache: true, route: null, webMentions: 0 });
   });
 
-  const task = [
-    `Question: "${input.question}"`,
-    'Places on the map, with the reviews already read:',
-    JSON.stringify(
-      [...state.candidates.values()].map((candidate) => ({
-        ...briefPlace(candidate),
-        verdict: candidate.place.verdict,
-        reviews: briefReviews(candidate.place.reviews),
-      })),
-    ),
-  ].join('\n');
+  const places = [...state.candidates.values()].map((candidate) =>
+    compact({
+      place_id: candidate.key,
+      name: candidate.place.name,
+      rating: candidate.place.rating,
+      price: candidate.place.priceLevel,
+      distance: distLabel(candidate.place.distanceM),
+      verdict: candidate.place.verdict,
+      reviews: reviewLines(candidate.place.reviews, state.focus, 5, 200),
+    }),
+  );
+  const task = followupTask(input.question, chatContext(messages), memory, places);
 
   const finish = await runLoop(state, FOLLOWUP_SYSTEM, task, FOLLOWUP_TOOLS, 'finish_answer').catch((error) => {
     console.error('[agent followup]', error instanceof Error ? error.message : error);
@@ -640,13 +699,35 @@ export async function runFollowUpAgent(
   });
 
   const chosen = finish?.place_id ? state.candidates.get(String(finish.place_id)) : null;
-  const result = {
-    headline: String(finish?.headline || 'From the saved reviews').trim(),
-    reason: String(finish?.reason || (finish ? '' : 'The review reader was unavailable, so the map stays as it is.')).trim(),
+  const usage = report(state, `chat "${input.question}"`);
+  const headline = String(finish?.headline || 'From the saved reviews').trim();
+  const reason = String(finish?.reason || (finish ? '' : 'The review reader was unavailable, so the map stays as it is.')).trim();
+  const answer = String(finish?.answer || '').trim() || [headline, reason].filter(Boolean).join('. ');
+  const result: FollowUpResult = {
+    answer,
+    headline,
+    reason,
     placeId: chosen?.place.id ?? null,
     verdict: chosen ? String(finish?.verdict || '').trim() || null : null,
     trace: state.trace,
+    usage,
   };
-  emit({ type: 'done', result });
-  return result;
+  const reply: ChatMessage = {
+    id: messageId(),
+    role: 'assistant',
+    text: answer,
+    at: Date.now(),
+    placeId: result.placeId,
+    placeName: chosen?.place.name ?? null,
+    steps: state.trace,
+  };
+  await appendChat(actor.userId, input.fingerprint, [asked, reply]);
+  await learn(actor.userId, input.question).catch(() => undefined);
+  if (finish) {
+    const { usage: _usage, ...answerOnly } = result;
+    await kvSet(key, answerOnly, ANSWER_TTL);
+  }
+  const done = { ...result, messages: [asked, reply], memory: await loadMemory(actor.userId) };
+  emit({ type: 'done', result: done });
+  return done;
 }

@@ -1,9 +1,10 @@
 import { CATEGORIES, FoodRing, Logo, Photo, foodImg, useTitle } from '@/components/brand';
 import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
 import { useSession } from '@/lib/session';
-import { ArrowRight, Search, Sparkles } from 'lucide-react';
+import { currentPosition, placeNameFor, readSpot, saveSpot, type Spot } from '@/lib/spot';
+import { ArrowRight, Check, LocateFixed, Search, Sparkles } from 'lucide-react';
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const QUICK_PICKS = ['Biryani', 'Filter coffee', 'Pure veg', 'Rooftop cafe'];
 const HEADLINE = ['Find', 'a', 'place', 'to'];
@@ -18,26 +19,74 @@ function short(text: string, max = 22) {
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
 
+/** "Ashok Nagar, Bengaluru" -> "Bengaluru" when the full name is too long for the bubble. */
+function town(label: string | null) {
+  if (!label) return null;
+  return label.length <= 22 ? label : label.split(',').pop()?.trim() || label;
+}
+
 export function Home() {
   useTitle();
   const navigate = useNavigate();
   const { session, initial } = useSession();
+  // Step 1 is knowing where the user is; the craving search only appears after that.
+  const [spot, setSpot] = useState<Spot | null>(readSpot);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState('');
+  const [foundAt, setFoundAt] = useState(0);
   const [craving, setCraving] = useState('');
   const [greeting, setGreeting] = useState(true);
   const [goHover, setGoHover] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const input = useInputGaze();
+  const justFound = foundAt > 0 && Date.now() - foundAt < 2400;
 
   useEffect(() => {
     const id = window.setTimeout(() => setGreeting(false), 2600);
     return () => window.clearTimeout(id);
   }, []);
 
-  function pick(label: string) {
-    const target = `/dashboard${label.trim() ? `?q=${encodeURIComponent(label.trim())}` : ''}`;
+  useEffect(() => {
+    if (!foundAt) return;
+    const id = window.setTimeout(() => setFoundAt(0), 2400);
+    return () => window.clearTimeout(id);
+  }, [foundAt]);
+
+  function go(label: string, where: { lat: number; lng: number }) {
+    const params = new URLSearchParams({ lat: where.lat.toFixed(6), lng: where.lng.toFixed(6) });
+    if (label.trim()) params.set('q', label.trim());
+    const target = `/dashboard?${params.toString()}`;
     setLeaving(true);
     // A short beat so the mascot's cheer is visible before the page changes.
     window.setTimeout(() => navigate(session ? target : '/login', session ? undefined : { state: { next: target } }), 380);
+  }
+
+  async function locate(then?: string) {
+    if (locating) return;
+    setLocating(true);
+    setLocError('');
+    try {
+      const where = await currentPosition();
+      const next = { ...where, label: await placeNameFor(where.lat, where.lng) };
+      saveSpot(next);
+      setSpot({ ...next, at: Date.now() });
+      setFoundAt(Date.now());
+      if (then) go(then, next);
+    } catch (error) {
+      setLocError(error instanceof Error ? error.message : "Couldn't find you.");
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  /** A craving picked before locating runs the locate step first, then carries on. */
+  function pick(label: string) {
+    if (spot) {
+      go(label, spot);
+      return;
+    }
+    setCraving(label);
+    void locate(label);
   }
 
   function onSearch(event: FormEvent) {
@@ -46,16 +95,24 @@ export function Home() {
   }
 
   const typing = Boolean(input.focused);
-  const mood: MascotMood = leaving ? 'found' : goHover ? 'happy' : typing ? 'curious' : greeting ? 'wave' : 'idle';
-  const bubble = leaving
-    ? { kind: 'go', text: 'On it! Reading the reviews.' }
-    : goHover
-      ? { kind: 'hover', text: "Let's eat!" }
-      : craving.trim()
-        ? { kind: 'craving', text: `${short(craving)}? Good call. I'll check who makes it best.` }
-        : typing
-          ? { kind: 'typing', text: 'Type a dish. I read the newest reviews.' }
-          : { kind: 'hello', text: "Hi, I'm YumFindAI. What are you craving?" };
+  const where = town(spot?.label ?? null);
+  let mood: MascotMood = 'idle';
+  if (leaving || justFound) mood = 'found';
+  else if (locating) mood = 'searching';
+  else if (locError) mood = 'sad';
+  else if (goHover) mood = 'happy';
+  else if (typing) mood = 'curious';
+  else if (greeting && !spot) mood = 'wave';
+
+  let bubble = { kind: 'ask', text: `What are you craving${where ? ` in ${where}` : ''}?` };
+  if (leaving) bubble = { kind: 'go', text: 'On it! Reading the reviews.' };
+  else if (locating) bubble = { kind: 'locating', text: 'Looking around for you...' };
+  else if (locError) bubble = { kind: 'error', text: "I can't see where you are. Drop a pin on the map?" };
+  else if (!spot) bubble = { kind: 'hello', text: "Hi, I'm YumFindAI. First, where are you?" };
+  else if (justFound) bubble = { kind: 'found', text: `Found you${where ? ` in ${where}` : ''}! What are you craving?` };
+  else if (goHover) bubble = { kind: 'hover', text: "Let's eat!" };
+  else if (craving.trim()) bubble = { kind: 'craving', text: `${short(craving)}? Good call. I'll check who makes it best.` };
+  else if (typing) bubble = { kind: 'typing', text: 'Type a dish. I read the newest reviews.' };
 
   return (
     <main className="min-h-dvh overflow-hidden bg-white" style={{ animation: 'fadeIn .5s ease backwards' }}>
@@ -126,39 +183,62 @@ export function Home() {
             </span>
           </h1>
           <p className="m-0 max-w-[480px] text-lg leading-relaxed text-muted [text-wrap:pretty]" style={{ animation: 'fadeUp .7s ease .5s backwards' }}>
-            Say what you are craving. YumFindAI searches Google Maps, reads the newest reviews, cross-checks the web, and ranks only what the evidence supports.
+            Tell YumFindAI where you are and what you're craving. It searches Google Maps, reads the newest reviews, cross-checks the web, and ranks only what the evidence supports.
           </p>
-          <form
-            onSubmit={onSearch}
-            className="flex max-w-[560px] items-center gap-2 rounded-[20px] bg-white p-2"
-            style={{ boxShadow: '0 18px 50px rgba(28,26,31,.10),0 0 0 1px #f1edf2', animation: 'fadeUp .7s ease .62s backwards' }}
-          >
-            <Search className="ml-3 flex-none text-faint" size={20} strokeWidth={2.5} />
-            <input
-              value={craving}
-              onChange={(event) => setCraving(event.target.value)}
-              placeholder="Biryani, cafe, or hotel"
-              aria-label="What are you craving?"
-              className="min-w-0 flex-1 border-none bg-transparent px-1 py-3 text-base font-medium text-ink outline-none"
-              {...input.bind}
-            />
-            <button
-              type="submit"
-              className="btn-primary flex-none px-[22px] py-3.5"
-              onPointerEnter={() => setGoHover(true)}
-              onPointerLeave={() => setGoHover(false)}
-            >
-              Find food
-              <ArrowRight size={16} strokeWidth={2.75} />
-            </button>
-          </form>
-          <div className="flex flex-wrap gap-2" style={{ animation: 'fadeUp .7s ease .74s backwards' }}>
-            {QUICK_PICKS.map((label) => (
-              <button key={label} className="pill-link" onClick={() => pick(label)}>
-                {label}
-              </button>
-            ))}
-          </div>
+          {spot ? (
+            <div className="flex max-w-[560px] flex-col gap-3" style={{ animation: 'fadeUp .5s ease backwards' }}>
+              <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink-2">
+                <span className="grid h-6 w-6 flex-none place-items-center rounded-full bg-[#e6f6ed] text-[#137a41]">
+                  <Check size={14} strokeWidth={3} />
+                </span>
+                <span className="min-w-0 truncate">
+                  You're in <b className="text-ink">{spot.label || 'your current location'}</b>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void locate()}
+                  disabled={locating}
+                  className="flex-none cursor-pointer border-none bg-transparent p-0 text-sm font-bold text-tomato hover:underline disabled:cursor-default disabled:opacity-60"
+                >
+                  {locating ? 'Locating...' : 'Change'}
+                </button>
+              </div>
+              <form
+                onSubmit={onSearch}
+                className="flex items-center gap-2 rounded-[20px] bg-white p-2"
+                style={{ boxShadow: '0 18px 50px rgba(28,26,31,.10),0 0 0 1px #f1edf2' }}
+              >
+                <Search className="ml-3 flex-none text-faint" size={20} strokeWidth={2.5} />
+                <input
+                  value={craving}
+                  onChange={(event) => setCraving(event.target.value)}
+                  placeholder="Biryani, cafe, or hotel"
+                  aria-label="What are you craving?"
+                  autoFocus={justFound}
+                  className="min-w-0 flex-1 border-none bg-transparent px-1 py-3 text-base font-medium text-ink outline-none"
+                  {...input.bind}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary flex-none px-[22px] py-3.5"
+                  onPointerEnter={() => setGoHover(true)}
+                  onPointerLeave={() => setGoHover(false)}
+                >
+                  Find food
+                  <ArrowRight size={16} strokeWidth={2.75} />
+                </button>
+              </form>
+              <div className="flex flex-wrap gap-2">
+                {QUICK_PICKS.map((label) => (
+                  <button key={label} className="pill-link" onClick={() => pick(label)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <LocateStep locating={locating} error={locError} onLocate={() => void locate()} />
+          )}
         </div>
 
         <HeroArt mood={mood} lookAt={input.point} bubble={bubble} />
@@ -188,6 +268,39 @@ export function Home() {
         </div>
       </footer>
     </main>
+  );
+}
+
+function LocateStep({ locating, error, onLocate }: { locating: boolean; error: string; onLocate: () => void }) {
+  return (
+    <div className="flex max-w-[560px] flex-col gap-3" style={{ animation: 'fadeUp .7s ease .62s backwards' }}>
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-[20px] bg-white p-2 pl-3"
+        style={{ boxShadow: '0 18px 50px rgba(28,26,31,.10),0 0 0 1px #f1edf2' }}
+      >
+        <span className="grid h-11 w-11 flex-none place-items-center rounded-full bg-blush text-tomato">
+          <LocateFixed size={21} strokeWidth={2.5} />
+        </span>
+        <div className="min-w-[150px] flex-1">
+          <p className="m-0 text-[15px] font-bold text-ink">Where are you?</p>
+          <p className="m-0 text-[13px] font-medium text-muted">Step 1 of 2, then tell YumFindAI what you're craving</p>
+        </div>
+        <button type="button" onClick={onLocate} disabled={locating} className="btn-primary flex-none px-[22px] py-3.5 max-sm:w-full">
+          <LocateFixed size={16} strokeWidth={2.75} />
+          {locating ? 'Finding you...' : 'Locate me'}
+        </button>
+      </div>
+      {error ? (
+        <p className="m-0 text-sm font-semibold text-[#d42a35]" style={{ animation: 'fadeUp .3s ease backwards' }}>
+          {error}{' '}
+          <Link to="/dashboard?pin=1" className="font-bold">
+            Drop a pin on the map instead
+          </Link>
+        </p>
+      ) : (
+        <p className="m-0 text-[13px] font-medium text-faint">YumFindAI uses your location only to search near you.</p>
+      )}
+    </div>
   );
 }
 

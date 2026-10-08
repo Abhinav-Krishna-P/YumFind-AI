@@ -1,9 +1,11 @@
 import { MapCanvas, type RoutePoint } from '@/components/MapCanvas';
 import { CATEGORIES, Logo, Photo, useTitle } from '@/components/brand';
-import { LogoMark, Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
-import { AgentTrace } from '@/components/AgentTrace';
-import { api, apiStream, upsertStep, type AgentStep, type Place, type TraceStep } from '@/lib/api';
+import { LogoMark, Mascot, useInputGaze } from '@/components/mascot/Mascot';
+import { AgentTrace, agentMood } from '@/components/AgentTrace';
+import { ChatPanel, type ChatAnswer } from '@/components/ChatPanel';
+import { api, apiStream, upsertStep, type AgentStep, type Place, type RunUsage, type TraceStep } from '@/lib/api';
 import { useSession } from '@/lib/session';
+import { readSpot, saveSpot } from '@/lib/spot';
 import { distanceLabel, rupees } from '@/lib/utils';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -28,20 +30,6 @@ const TONES = {
   negative: { label: 'Negative', dot: '#ff3d54', bg: '#ffeceb', fg: '#c4222d' },
 } as const;
 
-// What the mascot does while the agent works: the running SerpApi call decides the pose.
-const TOOL_MOOD: Record<string, MascotMood> = {
-  search_places: 'searching',
-  read_reviews: 'reading',
-  web_search: 'thinking',
-  get_directions: 'thinking',
-  cache: 'happy',
-};
-
-function agentMood(steps: AgentStep[] | null): MascotMood {
-  const running = steps ? [...steps].reverse().find((step) => step.status === 'running') : undefined;
-  return running ? TOOL_MOOD[running.tool] || 'thinking' : 'thinking';
-}
-
 /** True for `ms` after the value changes to something truthy; used for short mascot reactions. */
 function useBeat(value: unknown, ms: number) {
   const [on, setOn] = useState(() => Boolean(value));
@@ -52,6 +40,29 @@ function useBeat(value: unknown, ms: number) {
     return () => window.clearTimeout(id);
   }, [value, ms]);
   return on;
+}
+
+function addUsage(a: RunUsage | null, b: RunUsage | undefined): RunUsage | null {
+  if (!b) return a;
+  if (!a) return b;
+  return {
+    cacheHit: a.cacheHit && b.cacheHit,
+    turns: a.turns + b.turns,
+    serpCalls: a.serpCalls + b.serpCalls,
+    promptTokens: a.promptTokens + b.promptTokens,
+    cachedTokens: a.cachedTokens + b.cachedTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    thinkingTokens: a.thinkingTokens + b.thinkingTokens,
+  };
+}
+
+/** "9 SerpApi calls · 14.2k tokens", or a note that the answer came from memory. */
+function costLabel(usage: RunUsage | null) {
+  if (!usage) return null;
+  if (usage.cacheHit) return 'from memory, no new SerpApi calls';
+  const tokens = usage.promptTokens + usage.outputTokens + usage.thinkingTokens;
+  const shown = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+  return `${usage.serpCalls} SerpApi call${usage.serpCalls === 1 ? '' : 's'} · ${shown} tokens`;
 }
 
 function toggle(list: string[], value: string) {
@@ -74,16 +85,15 @@ export function Dashboard() {
   const [headline, setHeadline] = useState('');
   const [reason, setReason] = useState('');
   const [fingerprint, setFingerprint] = useState('');
-  const [follow, setFollow] = useState('');
-  const [followOpen, setFollowOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [error, setError] = useState('');
   const [route, setRoute] = useState<{ path: RoutePoint[]; distance: string | null; duration: string | null } | null>(null);
   const [routeNote, setRouteNote] = useState('');
   const [placeLabel, setPlaceLabel] = useState('');
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [trace, setTrace] = useState<TraceStep[]>([]);
+  const [usage, setUsage] = useState<RunUsage | null>(null);
   const [showTrace, setShowTrace] = useState(false);
-  const [askSteps, setAskSteps] = useState<AgentStep[] | null>(null);
   const [listening, setListening] = useState(false);
   const [resultsAt, setResultsAt] = useState(0);
   const [chipAt, setChipAt] = useState(0);
@@ -91,7 +101,6 @@ export function Dashboard() {
   const celebrating = useBeat(resultsAt, 2600);
   const chipCheer = useBeat(chipAt, 700);
   const cravingGaze = useInputGaze();
-  const followGaze = useInputGaze();
   useTitle('Map');
 
   useEffect(() => {
@@ -99,12 +108,36 @@ export function Dashboard() {
     let live = true;
     setPlaceLabel('');
     api<{ label: string | null }>('/api/where', user)
-      .then((result) => live && setPlaceLabel(result.label || 'Your location'))
+      .then((result) => {
+        if (!live) return;
+        setPlaceLabel(result.label || 'Your location');
+        saveSpot({ ...user, label: result.label });
+      })
       .catch(() => live && setPlaceLabel('Your location'));
     return () => {
       live = false;
     };
   }, [user]);
+
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    if (params.get('pin') === '1') {
+      setDropMode(true);
+      return;
+    }
+    const lat = Number(params.get('lat'));
+    const lng = Number(params.get('lng'));
+    const handedOver = params.has('lat') && params.has('lng') && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+    const start = handedOver ? { lat, lng } : readSpot();
+    if (!start) return;
+    placeUser(start.lat, start.lng);
+    const q = params.get('q')?.trim();
+    if (q) void advance(q);
+    // Runs once with the URL the map was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selected = ranked.find((place) => place.id === selectedId) || null;
   const showPlaces = phase === 'ranking' || phase === 'place' || (phase === 'searching' && ranked.length > 0);
@@ -124,6 +157,7 @@ export function Dashboard() {
   );
 
   function placeUser(lat: number, lng: number) {
+    saveSpot({ lat, lng, label: null });
     setUser({ lat, lng });
     setDropMode(false);
     setRanked([]);
@@ -166,10 +200,14 @@ export function Dashboard() {
 
   async function submitCraving(event: FormEvent) {
     event.preventDefault();
-    if (!craving.trim()) return;
+    await advance(craving);
+  }
+
+  async function advance(text: string) {
+    if (!text.trim()) return;
     try {
-      await api('/api/topic', { text: craving, mode: 'search' });
-      infer(craving);
+      await api('/api/topic', { text, mode: 'search' });
+      infer(text);
       setPhase('constraints');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'YumFindAI only answers food, restaurant, and hotel questions');
@@ -183,6 +221,7 @@ export function Dashboard() {
     setSteps([]);
     setTrace([]);
     setShowTrace(false);
+    setChatOpen(false);
     setRanked([]);
     setSelectedId(null);
     setRoute(null);
@@ -194,6 +233,7 @@ export function Dashboard() {
         reason: string;
         places: Place[];
         trace: TraceStep[];
+        usage?: RunUsage;
       }>(
         '/api/agent/search',
         { craving, lat: user.lat, lng: user.lng, radiusM: radius, preferences: prefs, addons, locationLabel: placeLabel || undefined },
@@ -208,6 +248,7 @@ export function Dashboard() {
       setReason(result.reason);
       setRanked(result.places);
       setTrace(result.trace || []);
+      setUsage(result.usage ?? null);
       setPhase('ranking');
       setResultsAt(Date.now());
     } catch (err) {
@@ -216,36 +257,19 @@ export function Dashboard() {
     }
   }
 
-  async function ask(event: FormEvent) {
-    event.preventDefault();
-    if (!follow.trim() || !fingerprint) return;
-    const question = follow.trim();
-    setFollow('');
-    setFollowOpen(false);
-    setAskSteps([]);
-    try {
-      const result = await apiStream<{ headline: string; reason: string; placeId: string | null; verdict: string | null; trace: TraceStep[] }>(
-        '/api/agent/followup',
-        { fingerprint, question, lat: user?.lat, lng: user?.lng },
-        (event) => {
-          if (event.type === 'step') setAskSteps((current) => upsertStep(current || [], event));
-        },
-      );
-      setHeadline(result.headline);
-      setReason(result.reason);
-      if (result.trace?.length) setTrace((current) => [...current, ...result.trace]);
-      if (result.placeId) {
-        setRanked((current) =>
-          current.map((place) => (place.id === result.placeId && result.verdict ? { ...place, verdict: result.verdict } : place)),
-        );
-        openPlace(result.placeId);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search is unavailable');
-      setPhase('error');
-    } finally {
-      setAskSteps(null);
+  // A chat answer feeds the same trace, cost and verdicts as the search itself.
+  function onChatAnswer(result: ChatAnswer) {
+    if (result.trace?.length) setTrace((current) => [...current, ...result.trace]);
+    setUsage((current) => addUsage(current, result.usage));
+    if (result.placeId && result.verdict) {
+      setRanked((current) => current.map((place) => (place.id === result.placeId ? { ...place, verdict: result.verdict } : place)));
     }
+  }
+
+  function showFromChat(id: string) {
+    openPlace(id);
+    // On a phone the chat covers the place card, so step aside; the chat is saved and reopens as it was.
+    if (window.matchMedia('(max-width: 767px)').matches) setChatOpen(false);
   }
 
   function openPlace(id: string) {
@@ -280,8 +304,10 @@ export function Dashboard() {
     setRouteNote('');
   }
 
+  const chatVisible = chatOpen && Boolean(fingerprint) && (phase === 'ranking' || phase === 'place');
+
   return (
-    <main className="relative h-dvh overflow-hidden bg-[#f3f1f4]">
+    <main className={`relative h-dvh overflow-hidden bg-[#f3f1f4]${chatVisible ? ' chat-open' : ''}`}>
       <MapCanvas
         user={user}
         places={mapPlaces}
@@ -302,6 +328,17 @@ export function Dashboard() {
             {user ? placeLabel || 'Locating...' : dropMode ? 'Tap the map to set' : 'Not set yet'}
           </span>
         </div>
+        {user ? (
+          <button
+            type="button"
+            onClick={locate}
+            aria-label="Locate me again"
+            title="Locate me again"
+            className="grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-full border-none bg-transparent text-muted hover:bg-mist hover:text-tomato"
+          >
+            <LocateFixed size={17} strokeWidth={2.5} />
+          </button>
+        ) : null}
         <button
           onClick={() => navigate('/profile')}
           aria-label="Profile"
@@ -312,19 +349,21 @@ export function Dashboard() {
         </button>
       </header>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center p-4">
+      <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center p-4${chatVisible ? ' md:pr-[432px]' : ''}`}>
         {phase === 'idle' ? (
           <div className="sheet max-w-[440px] overflow-hidden">
             <div className="relative flex h-[136px] items-end justify-center overflow-hidden" style={{ background: 'linear-gradient(150deg,#ffd75e,#ffa91f)' }}>
               <div className="dot-grid absolute inset-0 opacity-80" />
-              <Mascot mood={greeting ? 'wave' : 'idle'} size={126} follow className="relative -mb-1" />
+              <Mascot mood={greeting ? 'wave' : dropMode ? 'curious' : 'idle'} size={126} follow className="relative -mb-1" />
             </div>
             <div className="px-[22px] pb-[22px] pt-5">
-              <h1 className="m-0 font-display text-[26px] font-semibold">Locate yourself</h1>
-              <p className="mb-0 mt-1 text-sm text-muted">YumFindAI only shows your position until you search.</p>
-              <button onClick={locate} className="btn-primary mt-4 h-[52px] w-full text-base">
+              <h1 className="m-0 font-display text-[26px] font-semibold">{dropMode ? 'Drop a pin' : 'Locate yourself'}</h1>
+              <p className="mb-0 mt-1 text-sm text-muted">
+                {dropMode ? 'Tap anywhere on the map to set where you are.' : 'YumFindAI only shows your position until you search.'}
+              </p>
+              <button onClick={locate} className={`${dropMode ? 'btn-outline' : 'btn-primary'} mt-4 h-[52px] w-full text-base`}>
                 <LocateFixed size={18} strokeWidth={2.5} />
-                Locate me
+                {dropMode ? 'Use my location instead' : 'Locate me'}
               </button>
             </div>
           </div>
@@ -440,43 +479,14 @@ export function Dashboard() {
           <div className="sheet min-w-0 max-w-[1220px] p-[18px]">
             <div className="mx-1.5 mb-3.5 flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <Mascot
-                  mood={askSteps ? agentMood(askSteps) : followGaze.focused ? 'curious' : celebrating ? 'found' : 'idle'}
-                  size={60}
-                  follow
-                  lookAt={followGaze.point}
-                  steam={false}
-                  className="flex-none"
-                />
+                <Mascot mood={celebrating ? 'found' : 'idle'} size={60} follow steam={false} className="flex-none" />
                 <ReviewReport headline={headline} places={ranked} />
               </div>
-              {followOpen ? (
-                <form className="flex flex-none gap-2" style={{ animation: 'fadeUp .3s ease backwards' }} onSubmit={(event) => void ask(event)}>
-                  <input
-                    className="h-11 w-[220px] rounded-xl border-[1.5px] border-line-2 px-3.5 text-sm font-medium outline-none focus:border-tomato"
-                    value={follow}
-                    onChange={(event) => setFollow(event.target.value)}
-                    placeholder="Which is less spicy?"
-                    aria-label="Ask YumFindAI about these places"
-                    autoFocus
-                    {...followGaze.bind}
-                  />
-                  <button type="submit" className="btn-primary h-11 rounded-xl px-[18px] text-sm shadow-none">
-                    Ask
-                  </button>
-                </form>
-              ) : (
-                <button className="btn-outline h-11 flex-none px-4" type="button" onClick={() => setFollowOpen(true)}>
-                  <MessageCircle size={15} strokeWidth={2.5} />
-                  Ask about these
-                </button>
-              )}
+              <button className={`${chatOpen ? 'btn-primary shadow-none' : 'btn-outline'} h-11 flex-none px-4`} type="button" onClick={() => setChatOpen((open) => !open)}>
+                <MessageCircle size={15} strokeWidth={2.5} />
+                {chatOpen ? 'Chat open' : 'Ask about these'}
+              </button>
             </div>
-            {askSteps ? (
-              <div className="mx-1.5 mb-3.5 rounded-2xl bg-mist px-4 py-3">
-                <AgentTrace steps={askSteps} compact />
-              </div>
-            ) : null}
             <ResultCarousel places={ranked} onOpen={openPlace} />
             {trace.length ? (
               <div className="mx-1.5 mt-2">
@@ -486,7 +496,7 @@ export function Dashboard() {
                   className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent p-0 text-xs font-bold text-tomato hover:underline"
                 >
                   <LogoMark size={16} />
-                  How YumFindAI decided · {trace.length} SerpApi calls
+                  How YumFindAI decided{costLabel(usage) ? ` · ${costLabel(usage)}` : ''}
                   {showTrace ? <ChevronUp size={13} strokeWidth={2.75} /> : <ChevronDown size={13} strokeWidth={2.75} />}
                 </button>
                 {showTrace ? (
@@ -520,6 +530,20 @@ export function Dashboard() {
           </div>
         ) : null}
       </div>
+
+      {chatVisible ? (
+        <div className="absolute inset-x-2 bottom-2 top-[26%] z-30 flex md:inset-x-auto md:bottom-4 md:right-4 md:top-[92px] md:w-[400px]">
+          <ChatPanel
+            key={fingerprint}
+            fingerprint={fingerprint}
+            placeCount={ranked.length}
+            user={user}
+            onClose={() => setChatOpen(false)}
+            onShowPlace={showFromChat}
+            onAnswer={onChatAnswer}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }

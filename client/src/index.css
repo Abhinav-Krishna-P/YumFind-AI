@@ -361,3 +361,10 @@ input::placeholder {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The docked chat covers the map's right edge on desktop: move the zoom buttons clear of it. */
+@media (min-width: 768px) {
+  .chat-open .map-shell .maplibregl-ctrl-top-right {
+    right: 420px;
+  }
+}

@@ -1,5 +1,10 @@
 import { topicAllowed } from './gemini.js';
+import { kvGet, kvSet } from './kv.js';
+import { normalize } from './memory.js';
 import { HttpError } from './types.js';
+
+// The gate's verdict for a phrasing does not change, so each one costs at most one model call a day.
+const GATE_TTL = 24 * 60 * 60;
 
 const REJECT = 'YumFindAI only answers food, restaurant, and hotel questions';
 
@@ -22,9 +27,16 @@ export async function assertHospitality(text: string, mode: 'search' | 'followup
   if (!message) throw new HttpError(400, REJECT);
   if (OFF_TOPIC.test(message)) throw new HttpError(400, REJECT);
   if (onTopic(message, mode)) return;
+  const key = `gate:${mode}|${normalize(message)}`;
+  const known = await kvGet<boolean>(key);
+  if (known !== null) {
+    if (!known) throw new HttpError(400, REJECT);
+    return;
+  }
   let allowed: boolean;
   try {
     allowed = await topicAllowed(message, mode);
+    await kvSet(key, allowed, GATE_TTL);
   } catch (error) {
     console.error('[topic] gate unavailable', error instanceof Error ? error.message : error);
     // The gate is a courtesy filter. A follow-up can only be answered from places already on the map, so let it through.

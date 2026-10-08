@@ -27,8 +27,10 @@ export const env = {
   gemini: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   embedModel: process.env.GEMINI_EMBED_MODEL || 'gemini-embedding-001',
-  /** Optional Gemini thinking level for agent turns, e.g. "low" to spend fewer thinking tokens. */
-  geminiThinking: process.env.GEMINI_THINKING || '',
+  /** Gemini thinking level for agent turns. "low" spends far fewer thinking tokens; set GEMINI_THINKING= to use the model default. */
+  geminiThinking: process.env.GEMINI_THINKING ?? 'low',
+  /** Chat history, agent memory and answer cache. Unset or unreachable falls back to process memory. */
+  redisUrl: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
   jev: process.env.TYPESAFE_AI_API_KEY || '',
   jevModel: process.env.JEV_MODEL || 'jev-latest',
 };

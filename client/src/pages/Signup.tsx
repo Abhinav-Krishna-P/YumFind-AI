@@ -2,17 +2,18 @@ import { AuthField, AuthMessages, AuthShell, AuthSubmit } from '@/components/Aut
 import { useSkipIfSignedIn } from '@/lib/session';
 import { setRemember, supabase } from '@/lib/supabase';
 import { FormEvent, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 export function Signup() {
   const navigate = useNavigate();
+  const next = (useLocation().state as { next?: string } | null)?.next || '/dashboard';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
-  useSkipIfSignedIn('/dashboard');
+  useSkipIfSignedIn(next);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -32,7 +33,7 @@ export function Signup() {
       return;
     }
     if (data.session) {
-      navigate('/dashboard');
+      navigate(next, { replace: true });
       return;
     }
     setInfo('Check your email to confirm, then log in.');

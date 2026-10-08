@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Mascot } from '@/components/mascot/Mascot';
 import { supabase } from '@/lib/supabase';
@@ -21,13 +21,15 @@ function Loading() {
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const [state, setState] = useState<'loading' | 'in' | 'out'>('loading');
+  const location = useLocation();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setState(data.session ? 'in' : 'out'));
   }, []);
 
   if (state === 'loading') return <Loading />;
-  if (state === 'out') return <Navigate to="/login" replace />;
+  // After logging in, carry on to the page (and query) that was asked for.
+  if (state === 'out') return <Navigate to="/login" replace state={{ next: location.pathname + location.search }} />;
   return children;
 }
 

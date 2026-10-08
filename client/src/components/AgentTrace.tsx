@@ -1,3 +1,4 @@
+import type { MascotMood } from '@/components/mascot/Mascot';
 import type { AgentStep } from '@/lib/api';
 import { Check, Database, Globe, MapPin, MessageSquareText, Navigation, Sparkles } from 'lucide-react';
 
@@ -17,13 +18,27 @@ const ENGINES: Record<string, string> = {
   cache: 'cache',
 };
 
+// What the mascot does while the agent works: the running SerpApi call decides the pose.
+const TOOL_MOOD: Record<string, MascotMood> = {
+  search_places: 'searching',
+  read_reviews: 'reading',
+  web_search: 'thinking',
+  get_directions: 'thinking',
+  cache: 'happy',
+};
+
+export function agentMood(steps: AgentStep[] | null): MascotMood {
+  const running = steps ? [...steps].reverse().find((step) => step.status === 'running') : undefined;
+  return running ? TOOL_MOOD[running.tool] || 'thinking' : 'thinking';
+}
+
 /** The agent's live work log: one row per SerpApi call, filled in as events stream from the server. */
-export function AgentTrace({ steps, compact = false }: { steps: AgentStep[]; compact?: boolean }) {
+export function AgentTrace({ steps, compact = false, waiting = 'Planning the search' }: { steps: AgentStep[]; compact?: boolean; waiting?: string }) {
   if (!steps.length) {
     return (
       <div className="flex items-center gap-3 text-sm font-semibold text-muted">
         <Spinner />
-        Planning the search
+        {waiting}
       </div>
     );
   }

@@ -1,7 +1,7 @@
 import { Logo, Photo, foodImg, useTitle } from '@/components/brand';
 import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
 import { createContext, useContext, useEffect, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 type Status = 'busy' | 'error' | 'success';
 
@@ -36,6 +36,8 @@ export function AuthShell({
   status?: Status;
 }) {
   useTitle(title);
+  // Keep "where to go after signing in" when switching between Log in and Sign up.
+  const carry = useLocation().state as { next?: string } | null;
   const gaze = useInputGaze();
   const [greeting, setGreeting] = useState(true);
 
@@ -63,7 +65,7 @@ export function AuthShell({
           </FieldGaze.Provider>
           <p className="mb-0 mt-[22px] text-sm text-muted">
             {switchLead}{' '}
-            <Link to={switchTo} className="font-bold">
+            <Link to={switchTo} state={carry} className="font-bold">
               {switchLabel}
             </Link>
           </p>

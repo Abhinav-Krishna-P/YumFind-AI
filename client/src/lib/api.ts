@@ -48,6 +48,16 @@ export async function api<T>(path: string, body: unknown): Promise<T> {
 }
 
 export type TraceStep = { tool: string; say: string; summary: string };
+/** What an agent run cost; `cacheHit` means it was answered from memory. */
+export type RunUsage = {
+  cacheHit: boolean;
+  turns: number;
+  serpCalls: number;
+  promptTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+};
 export type AgentStep = { id: number; tool: string; say: string; status: 'running' | 'done'; summary?: string };
 export type AgentEvent<T> =
   | { type: 'step'; id: number; tool: string; say: string; status: 'running' | 'done'; summary?: string }
@@ -103,4 +113,26 @@ export function upsertStep(steps: AgentStep[], event: Extract<AgentEvent<unknown
   const copy = steps.slice();
   copy[index] = next;
   return copy;
+}
+
+/** A stored chat message for one result set (kept server-side in Redis). */
+export type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  at: number;
+  placeId?: string | null;
+  placeName?: string | null;
+  steps?: TraceStep[];
+  cached?: boolean;
+};
+
+/** JSON request with the user's session for routes that are not plain POSTs. */
+export async function apiCall<T>(method: 'GET' | 'DELETE', path: string): Promise<T> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const res = await fetch(path, { method, headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(json.error || 'Request failed');
+  return json as T;
 }
