@@ -1,5 +1,5 @@
-import { Utensils } from 'lucide-react';
-import { useState, type CSSProperties } from 'react';
+import { LogoMark } from '@/components/mascot/Mascot';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 
 export const foodImg = (id: string) => `https://images.unsplash.com/photo-${id}?w=700&h=700&q=70&auto=format&fit=crop`;
@@ -15,26 +15,23 @@ export const CATEGORIES = [
   ['Samosa', '1601050690597-df0568f70950'],
 ].map(([label, id]) => ({ label, img: foodImg(id) }));
 
+/** The YumFindAI lockup: the mascot's pin as the mark, then the wordmark. */
 export function Logo({ size = 38, text = 23, to = '/' }: { size?: number; text?: number; to?: string }) {
   return (
-    <Link to={to} className="flex items-center gap-2.5 text-ink no-underline hover:text-ink">
-      <span
-        className="grid place-items-center text-white"
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size * 0.32,
-          background: 'var(--grad)',
-          boxShadow: '0 6px 16px rgba(255,61,84,.35)',
-        }}
-      >
-        <Utensils size={size * 0.52} strokeWidth={2.5} />
-      </span>
-      <span className="font-display font-bold tracking-[-.01em]" style={{ fontSize: text }}>
+    <Link to={to} aria-label="YumFindAI home" className="flex flex-none items-center gap-2 text-ink no-underline hover:text-ink">
+      <LogoMark size={size} />
+      <span className="font-display font-bold tracking-[-.01em]" style={{ fontSize: text }} aria-hidden="true">
         YumFind<span className="text-tomato">AI</span>
       </span>
     </Link>
   );
+}
+
+/** Sets the tab title, always ending in the product name. */
+export function useTitle(page?: string) {
+  useEffect(() => {
+    document.title = page ? `${page} · YumFindAI` : 'YumFindAI · Find food nearby from fresh reviews';
+  }, [page]);
 }
 
 /** Image on a warm gradient; hides itself if the URL fails so the gradient shows through. */

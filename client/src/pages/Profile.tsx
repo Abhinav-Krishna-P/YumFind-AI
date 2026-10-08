@@ -1,4 +1,5 @@
-import { Logo, Photo } from '@/components/brand';
+import { Logo, Photo, useTitle } from '@/components/brand';
+import { Mascot } from '@/components/mascot/Mascot';
 import { supabase } from '@/lib/supabase';
 import { LogOut, Map as MapIcon, Utensils } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -11,6 +12,7 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'nu
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
 export function Profile() {
+  useTitle('Profile');
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -69,9 +71,13 @@ export function Profile() {
       <div className="mx-auto grid max-w-[1080px] items-start gap-6 px-[clamp(18px,4vw,40px)] py-8 md:grid-cols-[340px_1fr]">
         <aside className="flex flex-col gap-4" style={{ animation: 'fadeUp .5s ease backwards' }}>
           <section className="overflow-hidden rounded-[22px] bg-white" style={{ boxShadow: '0 0 0 1px #f1edf2' }}>
-            <div className="h-20" style={{ background: 'linear-gradient(135deg,#ff7a3d,#ff3d54)' }} />
+            <div className="relative h-20" style={{ background: 'linear-gradient(135deg,#ff7a3d,#ff3d54)' }}>
+              <div className="absolute -bottom-7 right-5">
+                <Mascot mood="idle" greet size={92} outline follow steam={false} shadow={false} />
+              </div>
+            </div>
             <div className="px-6 pb-6">
-              <div className="-mt-10 h-20 w-20 rounded-full bg-white p-1" style={{ boxShadow: '0 8px 20px rgba(28,26,31,.12)' }}>
+              <div className="relative z-10 -mt-10 h-20 w-20 rounded-full bg-white p-1" style={{ boxShadow: '0 8px 20px rgba(28,26,31,.12)' }}>
                 {avatar ? (
                   <img className="h-full w-full rounded-full object-cover" src={avatar} alt="" />
                 ) : (
@@ -99,7 +105,10 @@ export function Profile() {
           <h2 className="m-0 font-display text-[22px] font-semibold">Recent visits</h2>
           <p className="m-0 mt-0.5 text-sm text-muted">Places you opened on the map.</p>
           {visits.length === 0 ? (
-            <p className="m-0 mt-6 rounded-2xl bg-mist px-4 py-6 text-center text-muted">No visits yet. Open a place on the map.</p>
+            <div className="mt-6 flex flex-col items-center gap-2 rounded-2xl bg-mist px-4 py-6 text-center">
+              <Mascot mood="curious" size={96} follow steam={false} />
+              <p className="m-0 text-muted">No visits yet. Open a place on the map and YumFindAI will remember it here.</p>
+            </div>
           ) : (
             <ul className="m-0 mt-4 list-none divide-y divide-line p-0">
               {visits.map((visit) => (

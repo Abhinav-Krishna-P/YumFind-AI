@@ -7,5 +7,6 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
   envDir: path.resolve(__dirname, '..'),
-  server: { proxy: { '/api': 'http://127.0.0.1:8787' } },
+  // A fixed port keeps the same origin, so the saved login is still there after a restart.
+  server: { port: 5173, strictPort: true, proxy: { '/api': 'http://127.0.0.1:8787' } },
 });

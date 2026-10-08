@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Photo, foodImg } from '@/components/brand';
+import { Mascot } from '@/components/mascot/Mascot';
 import { supabase } from '@/lib/supabase';
 import { Dashboard } from '@/pages/Dashboard';
 import { Home } from '@/pages/Home';
@@ -11,13 +11,8 @@ import { Signup } from '@/pages/Signup';
 function Loading() {
   return (
     <main className="grid min-h-dvh place-items-center" style={{ animation: 'fadeIn .3s ease backwards' }}>
-      <div className="flex flex-col items-center gap-[22px]">
-        <div className="h-[110px] w-[110px] rounded-full p-[5px]" style={{ background: 'var(--grad-ring)', animation: 'bob 1.2s ease-in-out infinite' }}>
-          <Photo
-            src={foodImg('1563379091339-03b21ab4a4f8')}
-            className="h-full w-full rounded-full border-4 border-white"
-          />
-        </div>
+      <div className="flex flex-col items-center gap-3">
+        <Mascot mood="searching" size={150} interactive={false} />
         <p className="m-0 font-display text-[26px] font-semibold">Finding your table...</p>
       </div>
     </main>

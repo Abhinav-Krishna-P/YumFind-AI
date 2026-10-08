@@ -1,5 +1,6 @@
 import { AuthField, AuthMessages, AuthShell, AuthSubmit } from '@/components/AuthShell';
-import { supabase } from '@/lib/supabase';
+import { useSkipIfSignedIn } from '@/lib/session';
+import { setRemember, supabase } from '@/lib/supabase';
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -11,12 +12,15 @@ export function Signup() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
+  useSkipIfSignedIn('/dashboard');
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError('');
     setInfo('');
+    // New accounts stay signed in on this device; Log in offers the choice.
+    setRemember(true);
     const { data, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -35,7 +39,14 @@ export function Signup() {
   }
 
   return (
-    <AuthShell title="Sign up" onSubmit={onSubmit} switchLead="Already eating?" switchLabel="Log in" switchTo="/login">
+    <AuthShell
+      title="Sign up"
+      onSubmit={onSubmit}
+      switchLead="Already eating?"
+      switchLabel="Log in"
+      switchTo="/login"
+      status={busy ? 'busy' : error ? 'error' : info ? 'success' : undefined}
+    >
       <AuthField label="Name" required value={name} onChange={(event) => setName(event.target.value)} />
       <AuthField label="Email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
       <AuthField

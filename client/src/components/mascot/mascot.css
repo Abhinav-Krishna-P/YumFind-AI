@@ -1,0 +1,132 @@
+/* Motion for the YumFindAI mascot. Translate and scale only: nothing here rotates. */
+
+.yf-mascot {
+  overflow: visible;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.yf-mascot.is-interactive {
+  cursor: pointer;
+}
+
+.yf-mascot .m-char,
+.yf-mascot .m-shadow,
+.yf-mascot .m-eye,
+.yf-mascot .m-arm,
+.yf-mascot .m-spark {
+  transform-box: fill-box;
+}
+
+.yf-mascot .m-char {
+  transform-origin: 50% 100%;
+}
+
+.yf-mascot .m-shadow,
+.yf-mascot .m-eye,
+.yf-mascot .m-arm,
+.yf-mascot .m-spark {
+  transform-origin: center;
+}
+
+.yf-mascot .m-breathe { animation: m-breathe 3.4s ease-in-out infinite; }
+.yf-mascot .m-bounce { animation: m-bounce 0.9s ease-in-out infinite; }
+.yf-mascot .m-shake { animation: m-shake 0.5s ease-in-out 1; }
+.yf-mascot .m-hop { animation: m-hop 0.75s cubic-bezier(0.25, 1.4, 0.5, 1) 1; }
+
+.yf-mascot .m-shadow-breathe { animation: m-shadow-breathe 3.4s ease-in-out infinite; }
+.yf-mascot .m-shadow-bounce { animation: m-shadow-bounce 0.9s ease-in-out infinite; }
+.yf-mascot .m-shadow-hop { animation: m-shadow-hop 0.75s cubic-bezier(0.25, 1.4, 0.5, 1) 1; }
+
+.yf-mascot .m-gaze { transition: transform 0.22s ease-out; }
+.yf-mascot .m-eye { transition: transform 90ms ease-in; }
+.yf-mascot.is-blink .m-eye { transform: scaleY(0.1); }
+.yf-mascot .m-arm { transition: transform 0.45s cubic-bezier(0.2, 1.3, 0.4, 1); }
+
+.yf-mascot .m-wave { animation: m-wave 0.95s ease-in-out infinite; }
+.yf-mascot .m-bob { animation: m-bob 1.4s ease-in-out infinite; }
+.yf-mascot .m-scan { animation: m-scan 1.8s ease-in-out infinite; }
+
+.yf-mascot .m-steam { opacity: 0; animation: m-steam 2.8s ease-in-out infinite; }
+.yf-mascot .m-s2 { animation-delay: 0.9s; }
+.yf-mascot .m-s3 { animation-delay: 1.8s; }
+
+.yf-mascot .m-dot { animation: m-dot 1.5s ease-in-out infinite; }
+.yf-mascot .m-spark { animation: m-spark 1.3s ease-in-out infinite; }
+.yf-mascot .m-ring { animation: m-ring 1.2s ease-in-out infinite; }
+.yf-mascot .m-d2 { animation-delay: 0.2s; }
+.yf-mascot .m-d3 { animation-delay: 0.4s; }
+.yf-mascot .m-sweat { animation: m-sweat 1.9s ease-in infinite; }
+
+@keyframes m-breathe {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-3px) scale(1.01, 0.985); }
+}
+@keyframes m-bounce {
+  0%, 100% { transform: translateY(0) scale(1.02, 0.97); }
+  50% { transform: translateY(-9px) scale(0.98, 1.03); }
+}
+@keyframes m-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes m-hop {
+  0% { transform: translateY(0) scale(1.08, 0.9); }
+  40% { transform: translateY(-22px) scale(0.95, 1.06); }
+  75% { transform: translateY(0) scale(1.06, 0.93); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+@keyframes m-shadow-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.96); }
+}
+@keyframes m-shadow-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.85); }
+}
+@keyframes m-shadow-hop {
+  0% { transform: scale(1.06); }
+  40% { transform: scale(0.7); opacity: 0.6; }
+  75% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+@keyframes m-wave {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(4px, -8px); }
+}
+@keyframes m-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes m-scan {
+  0%, 100% { transform: translateX(-3.5px); }
+  50% { transform: translateX(3.5px); }
+}
+@keyframes m-steam {
+  0% { opacity: 0; transform: translateY(6px); }
+  35% { opacity: 0.8; }
+  100% { opacity: 0; transform: translateY(-12px); }
+}
+@keyframes m-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes m-spark {
+  0%, 100% { opacity: 0.2; transform: scale(0.5); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+@keyframes m-ring {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+@keyframes m-sweat {
+  0% { opacity: 0; transform: translateY(-4px); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yf-mascot .m-steam { opacity: 0.75; }
+}

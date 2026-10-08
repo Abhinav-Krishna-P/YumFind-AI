@@ -1,3 +1,5 @@
+<p align="center"><img src="client/public/og-image.png" alt="YumFindAI: where to eat, picked from fresh reviews" width="840"></p>
+
 # YumFindAI
 
 **An AI agent that finds where to eat by reading what people said this month.**
@@ -15,7 +17,7 @@ Built for the **SerpApi India Hackathon 2026** · Track: *AI Agents* (also fits 
 | Shows every place matching a keyword | Ranks a short list from **evidence in reviews from the last 3 months** |
 | Rating is a number | Verdict says *what reviewers said about your dish*, and says plainly when they did not mention it |
 | One query, one list | An **agent loop**: search → read → judge → widen / re-query / cross-check → finish |
-| Opaque | A **live trace** of every SerpApi call the agent chose to make, and a "How YumAI decided" log afterwards |
+| Opaque | A **live trace** of every SerpApi call the agent chose to make, and a "How YumFindAI decided" log afterwards |
 | Follow-ups start over | "Which is closest by road and good for a family?" is answered from cached reviews, fetching directions or more reviews only when needed |
 
 ## How the agent works
@@ -45,6 +47,25 @@ Guard rails the agent runs under:
 - **Deterministic fallback.** If Gemini is unavailable, the server runs the same plan itself (search → read reviews for the top five → rank by rating and distance) and labels the result as rating-only.
 - **Topic gate.** Non-food requests are refused before any SerpApi call.
 - **Shared cache** in Supabase: same area + craving + constraints within 6 hours returns instantly without calling SerpApi; reviews are kept per place for 7 days.
+
+## Meet the mascot
+
+<img src="client/public/brand/yumfindai-mascot.png" alt="The YumFindAI mascot, a map pin with a steamed-bun face" width="120" align="right">
+
+YumFindAI's mascot is a map pin (*find*) with a steamed-bun face (*yum*). The same drawing is the logo mark and the favicon. It is one SVG component ([`client/src/components/mascot/art.tsx`](client/src/components/mascot/art.tsx)), so it stays sharp at every size and reacts to the app instead of being a static picture:
+
+| What is happening | What the mascot does |
+| --- | --- |
+| Agent calls `google_maps` | holds a magnifying glass over one eye |
+| Agent calls `google_maps_reviews` | reads a little review card |
+| Agent calls `google` or `google_maps_directions` | looks up and thinks |
+| Results arrive | cheers |
+| You type a craving or an email | watches the text cursor |
+| You type a password | covers its eyes |
+| Mic is listening | listens |
+| Something fails | looks worried |
+
+It also blinks, follows the pointer, cheers up when hovered and hops when tapped. All motion is translate/scale only and turns off for `prefers-reduced-motion`. Static brand files (logo, mark, mascot, icons, banner) are in [`client/public/brand`](client/public/brand) and [`client/public`](client/public).
 
 ## SerpApi usage
 
@@ -125,6 +146,8 @@ All routes except `/api/health` require a Supabase JWT.
 client/src/pages/Dashboard.tsx   map, search flow, live agent trace, result cards
 client/src/components/AgentTrace.tsx
 client/src/components/MapCanvas.tsx
+client/src/components/mascot/       the YumFindAI character: drawing, moods, motion
+client/public/brand/                logo, mark and mascot as SVG and PNG
 server/src/agent.ts              the agent loop, tools, prompts, budget, fallback
 server/src/serp.ts               every SerpApi call
 server/src/gemini.ts             Gemini REST client: function calling, JSON copy, embeddings, topic gate

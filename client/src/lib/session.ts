@@ -1,6 +1,21 @@
 import type { Session } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from './supabase';
+
+/** Sends an already signed-in visitor straight on, so a remembered session never sees the login form. */
+export function useSkipIfSignedIn(to: string) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    let live = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (live && data.session) navigate(to, { replace: true });
+    });
+    return () => {
+      live = false;
+    };
+  }, [navigate, to]);
+}
 
 export function displayNameOf(session: Session | null) {
   const user = session?.user;

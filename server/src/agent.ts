@@ -1,4 +1,4 @@
-import { toolTurn, type Content, type FunctionDeclaration, type Part } from './gemini.js';
+import { toolTurn, type Content, type FunctionDeclaration, type Part, type Usage } from './gemini.js';
 import { dishQuery, fingerprint, haversine } from './geo.js';
 import { embedLater, present } from './pipeline.js';
 import { fallbackPoints } from './rank.js';
@@ -8,7 +8,7 @@ import { assertHospitality } from './topic.js';
 import { HttpError, type Actor, type Place, type Review, type TraceStep } from './types.js';
 
 /*
- * YumAI as an agent. Gemini decides which SerpApi engines to call and when:
+ * YumFindAI as an agent. Gemini decides which SerpApi engines to call and when:
  *   search_places   -> engine=google_maps          (can change radius / open-now / min rating itself)
  *   read_reviews    -> engine=google_maps_reviews  (newest first, can page deeper for one place)
  *   web_search      -> engine=google               (local food blogs, "best X in Y" lists)
@@ -47,9 +47,30 @@ type State = {
   stepId: number;
   trace: TraceStep[];
   emit: Emit;
+  usage: Usage & { turns: number };
 };
 
 const MAX_TURNS = 10;
+
+function freshUsage() {
+  return { turns: 0, prompt: 0, cached: 0, output: 0, thoughts: 0 };
+}
+
+function addUsage(state: State, usage: Usage) {
+  state.usage.turns += 1;
+  state.usage.prompt += usage.prompt;
+  state.usage.cached += usage.cached;
+  state.usage.output += usage.output;
+  state.usage.thoughts += usage.thoughts;
+}
+
+function logUsage(label: string, state: State) {
+  const u = state.usage;
+  const cachedPct = u.prompt ? Math.round((u.cached / u.prompt) * 100) : 0;
+  console.log(
+    `[agent] ${label}: ${u.turns} turns, ${state.serpCalls} SerpApi calls, prompt ${u.prompt} tok (${cachedPct}% cached), output ${u.output}, thinking ${u.thoughts}`,
+  );
+}
 
 function clamp(value: unknown, max: number) {
   const number = typeof value === 'number' && Number.isFinite(value) ? value : Number(value);
@@ -421,7 +442,7 @@ type Finish = Record<string, unknown> | null;
 async function runLoop(state: State, system: string, task: string, tools: FunctionDeclaration[], finishTool: string): Promise<Finish> {
   const contents: Content[] = [{ role: 'user', parts: [{ text: task }] }];
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-    const model = await toolTurn(system, contents, tools);
+    const model = await toolTurn(system, contents, tools, { onUsage: (usage) => addUsage(state, usage) });
     if (!model) return null;
     contents.push(model);
     const calls = model.parts.filter((part): part is Extract<Part, { functionCall: unknown }> => 'functionCall' in part);
@@ -446,7 +467,7 @@ async function runLoop(state: State, system: string, task: string, tools: Functi
 
 // ---- Search -----------------------------------------------------------------------------------
 
-const SEARCH_SYSTEM = `You are YumAI, the food-finding agent inside YumFindAI. You find the best open places for one craving by calling SerpApi tools yourself, then rank them from evidence you actually read.
+const SEARCH_SYSTEM = `You are YumFindAI, a food-finding agent. You find the best open places for one craving by calling SerpApi tools yourself, then rank them from evidence you actually read.
 
 How to work:
 1. Start with search_places using the user's craving and radius.
@@ -494,6 +515,7 @@ export async function runSearchAgent(
     stepId: 0,
     trace: [],
     emit,
+    usage: freshUsage(),
   };
 
   const task = [
@@ -554,6 +576,7 @@ export async function runSearchAgent(
     new Promise((resolve) => setTimeout(resolve, 2500)),
   ]);
 
+  logUsage(`search "${input.craving}"`, state);
   const result = { cacheHit: false, fingerprint: key, headline, reason, places: saved.map(present), trace: state.trace, serpCalls: state.serpCalls };
   emit({ type: 'done', result });
   return result;
@@ -561,7 +584,7 @@ export async function runSearchAgent(
 
 // ---- Follow-up --------------------------------------------------------------------------------
 
-const FOLLOWUP_SYSTEM = `You are YumAI, answering one follow-up question about places already on the user's map. You already hold their recent reviews. Answer from that evidence first.
+const FOLLOWUP_SYSTEM = `You are YumFindAI, answering one follow-up question about places already on the user's map. You already hold their recent reviews. Answer from that evidence first.
 
 Use tools only when the stored reviews cannot answer:
 - read_reviews with more=true to read a deeper page for the places the question is about.
@@ -592,6 +615,7 @@ export async function runFollowUpAgent(
     stepId: 0,
     trace: [],
     emit,
+    usage: freshUsage(),
   };
   snapshot.places.forEach((place, index) => {
     const key = `p${index + 1}`;

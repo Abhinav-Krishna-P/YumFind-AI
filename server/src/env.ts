@@ -27,6 +27,8 @@ export const env = {
   gemini: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   embedModel: process.env.GEMINI_EMBED_MODEL || 'gemini-embedding-001',
+  /** Optional Gemini thinking level for agent turns, e.g. "low" to spend fewer thinking tokens. */
+  geminiThinking: process.env.GEMINI_THINKING || '',
   jev: process.env.TYPESAFE_AI_API_KEY || '',
   jevModel: process.env.JEV_MODEL || 'jev-latest',
 };

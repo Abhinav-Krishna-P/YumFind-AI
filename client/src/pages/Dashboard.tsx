@@ -1,10 +1,11 @@
 import { MapCanvas, type RoutePoint } from '@/components/MapCanvas';
-import { CATEGORIES, LiveDot, Logo, Photo } from '@/components/brand';
+import { CATEGORIES, Logo, Photo, useTitle } from '@/components/brand';
+import { LogoMark, Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
 import { AgentTrace } from '@/components/AgentTrace';
 import { api, apiStream, upsertStep, type AgentStep, type Place, type TraceStep } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { distanceLabel, rupees } from '@/lib/utils';
-import { ChevronDown, ChevronLeft, ChevronRight, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, Sparkles, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -26,6 +27,32 @@ const TONES = {
   neutral: { label: 'Neutral', dot: '#a19ca6', bg: '#f3f1f4', fg: '#4a4650' },
   negative: { label: 'Negative', dot: '#ff3d54', bg: '#ffeceb', fg: '#c4222d' },
 } as const;
+
+// What the mascot does while the agent works: the running SerpApi call decides the pose.
+const TOOL_MOOD: Record<string, MascotMood> = {
+  search_places: 'searching',
+  read_reviews: 'reading',
+  web_search: 'thinking',
+  get_directions: 'thinking',
+  cache: 'happy',
+};
+
+function agentMood(steps: AgentStep[] | null): MascotMood {
+  const running = steps ? [...steps].reverse().find((step) => step.status === 'running') : undefined;
+  return running ? TOOL_MOOD[running.tool] || 'thinking' : 'thinking';
+}
+
+/** True for `ms` after the value changes to something truthy; used for short mascot reactions. */
+function useBeat(value: unknown, ms: number) {
+  const [on, setOn] = useState(() => Boolean(value));
+  useEffect(() => {
+    if (!value) return;
+    setOn(true);
+    const id = window.setTimeout(() => setOn(false), ms);
+    return () => window.clearTimeout(id);
+  }, [value, ms]);
+  return on;
+}
 
 function toggle(list: string[], value: string) {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -57,6 +84,15 @@ export function Dashboard() {
   const [trace, setTrace] = useState<TraceStep[]>([]);
   const [showTrace, setShowTrace] = useState(false);
   const [askSteps, setAskSteps] = useState<AgentStep[] | null>(null);
+  const [listening, setListening] = useState(false);
+  const [resultsAt, setResultsAt] = useState(0);
+  const [chipAt, setChipAt] = useState(0);
+  const greeting = useBeat(1, 2600);
+  const celebrating = useBeat(resultsAt, 2600);
+  const chipCheer = useBeat(chipAt, 700);
+  const cravingGaze = useInputGaze();
+  const followGaze = useInputGaze();
+  useTitle('Map');
 
   useEffect(() => {
     if (!user) return;
@@ -173,6 +209,7 @@ export function Dashboard() {
       setRanked(result.places);
       setTrace(result.trace || []);
       setPhase('ranking');
+      setResultsAt(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search is unavailable');
       setPhase('error');
@@ -278,20 +315,15 @@ export function Dashboard() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center p-4">
         {phase === 'idle' ? (
           <div className="sheet max-w-[440px] overflow-hidden">
-            <div className="relative h-[110px] overflow-hidden" style={{ background: 'linear-gradient(150deg,#ffd75e,#ffa91f)' }}>
-              <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,.5) 2px,transparent 2px)', backgroundSize: '20px 20px' }} />
-              <div
-                className="absolute left-1/2 top-1/2 -ml-8 -mt-8 grid h-16 w-16 place-items-center rounded-full bg-white text-tomato"
-                style={{ boxShadow: '0 12px 28px rgba(160,90,0,.25)' }}
-              >
-                <span className="absolute inset-0 rounded-full bg-white" style={{ animation: 'pulse 2s ease-out infinite' }} />
-                <LocateFixed className="relative" size={28} strokeWidth={2.5} />
-              </div>
+            <div className="relative flex h-[136px] items-end justify-center overflow-hidden" style={{ background: 'linear-gradient(150deg,#ffd75e,#ffa91f)' }}>
+              <div className="dot-grid absolute inset-0 opacity-80" />
+              <Mascot mood={greeting ? 'wave' : 'idle'} size={126} follow className="relative -mb-1" />
             </div>
             <div className="px-[22px] pb-[22px] pt-5">
               <h1 className="m-0 font-display text-[26px] font-semibold">Locate yourself</h1>
-              <p className="mb-0 mt-1 text-sm text-muted">Only your position is shown until you search.</p>
+              <p className="mb-0 mt-1 text-sm text-muted">YumFindAI only shows your position until you search.</p>
               <button onClick={locate} className="btn-primary mt-4 h-[52px] w-full text-base">
+                <LocateFixed size={18} strokeWidth={2.5} />
                 Locate me
               </button>
             </div>
@@ -303,24 +335,38 @@ export function Dashboard() {
             className="pointer-events-auto flex items-center gap-3 rounded-full bg-white px-[22px] py-3.5 text-[15px] font-bold"
             style={{ boxShadow: '0 18px 44px rgba(28,26,31,.16)', animation: 'sheetIn .5s cubic-bezier(.2,1.25,.4,1) backwards' }}
           >
-            <LiveDot color="#ff4b2b" size={12} />
+            <Mascot mood="searching" size={36} steam={false} shadow={false} interactive={false} className="-my-1" />
             Finding your location...
           </div>
         ) : null}
 
         {phase === 'located' || phase === 'craving' ? (
           <div className="sheet max-w-[600px] p-[22px]">
-            <p className="m-0 font-display text-2xl font-semibold">{headline}</p>
-            <p className="mb-0 mt-0.5 text-sm text-muted">{reason}</p>
+            <div className="flex items-center gap-3.5">
+              <Mascot
+                mood={listening ? 'listening' : cravingGaze.focused ? 'curious' : 'idle'}
+                size={68}
+                follow
+                lookAt={cravingGaze.point}
+                steam={false}
+                className="flex-none"
+              />
+              <div className="min-w-0">
+                <p className="m-0 font-display text-2xl font-semibold">{headline}</p>
+                <p className="mb-0 mt-0.5 text-sm text-muted">{reason}</p>
+              </div>
+            </div>
             <form onSubmit={(event) => void submitCraving(event)} className="mt-4 flex gap-2 rounded-[18px] bg-mist p-1.5" style={{ boxShadow: '0 0 0 1.5px #ece8ee' }}>
               <Search className="my-auto ml-2.5 flex-none text-faint" size={19} strokeWidth={2.5} />
               <input
                 placeholder="Biryani, cafe, or hotel"
                 value={craving}
                 onChange={(event) => setCraving(event.target.value)}
+                aria-label="What are you craving?"
                 className="min-w-0 flex-1 border-none bg-transparent text-base font-medium text-ink outline-none"
+                {...cravingGaze.bind}
               />
-              <Mic onText={setCraving} />
+              <Mic onText={setCraving} onListening={setListening} />
               <button type="submit" className="btn-primary h-[46px] flex-none rounded-xl px-5 shadow-none">
                 Search
               </button>
@@ -344,24 +390,27 @@ export function Dashboard() {
 
         {phase === 'constraints' ? (
           <div className="sheet max-h-[56vh] max-w-[600px] overflow-auto p-[22px]">
-            <p className="m-0 font-display text-2xl font-semibold">Radius and preferences</p>
+            <div className="flex items-center gap-3">
+              <Mascot mood={chipCheer ? 'happy' : 'idle'} size={56} follow steam={false} className="flex-none" />
+              <p className="m-0 font-display text-2xl font-semibold">Radius and preferences</p>
+            </div>
             <ChipGroup title="Radius">
               {RADII.map((item, i) => (
-                <Chip key={item.id} index={i} active={radius === item.id} onClick={() => setRadius(item.id)}>
+                <Chip key={item.id} index={i} active={radius === item.id} onClick={() => { setRadius(item.id); setChipAt(Date.now()); }}>
                   {item.label}
                 </Chip>
               ))}
             </ChipGroup>
             <ChipGroup title="Preferences">
               {PREFS.map((item, i) => (
-                <Chip key={item} index={i} active={prefs.includes(item)} onClick={() => setPrefs((current) => toggle(current, item))}>
+                <Chip key={item} index={i} active={prefs.includes(item)} onClick={() => { setPrefs((current) => toggle(current, item)); setChipAt(Date.now()); }}>
                   {item}
                 </Chip>
               ))}
             </ChipGroup>
             <ChipGroup title="Add-ons">
               {ADDONS.map((item, i) => (
-                <Chip key={item} index={i} active={addons.includes(item)} onClick={() => setAddons((current) => toggle(current, item))}>
+                <Chip key={item} index={i} active={addons.includes(item)} onClick={() => { setAddons((current) => toggle(current, item)); setChipAt(Date.now()); }}>
                   {item}
                 </Chip>
               ))}
@@ -374,12 +423,10 @@ export function Dashboard() {
 
         {phase === 'searching' ? (
           <div className="sheet max-h-[60vh] max-w-[520px] overflow-auto p-[22px]">
-            <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 flex-none place-items-center rounded-xl text-white" style={{ background: 'var(--grad)' }}>
-                <Sparkles size={18} strokeWidth={2.5} />
-              </span>
+            <div className="flex items-center gap-3.5">
+              <Mascot mood={agentMood(steps)} size={76} steam={false} className="flex-none" />
               <div className="min-w-0">
-                <p className="m-0 font-display text-[22px] font-semibold leading-tight">YumAI is on it</p>
+                <p className="m-0 font-display text-[22px] font-semibold leading-tight">YumFindAI is on it</p>
                 <p className="m-0 text-[13px] font-medium text-muted">Choosing which Google data to pull, live through SerpApi.</p>
               </div>
             </div>
@@ -392,7 +439,17 @@ export function Dashboard() {
         {phase === 'ranking' ? (
           <div className="sheet min-w-0 max-w-[1220px] p-[18px]">
             <div className="mx-1.5 mb-3.5 flex flex-wrap items-center justify-between gap-3">
-              <ReviewReport headline={headline} places={ranked} />
+              <div className="flex min-w-0 items-center gap-3">
+                <Mascot
+                  mood={askSteps ? agentMood(askSteps) : followGaze.focused ? 'curious' : celebrating ? 'found' : 'idle'}
+                  size={60}
+                  follow
+                  lookAt={followGaze.point}
+                  steam={false}
+                  className="flex-none"
+                />
+                <ReviewReport headline={headline} places={ranked} />
+              </div>
               {followOpen ? (
                 <form className="flex flex-none gap-2" style={{ animation: 'fadeUp .3s ease backwards' }} onSubmit={(event) => void ask(event)}>
                   <input
@@ -400,7 +457,9 @@ export function Dashboard() {
                     value={follow}
                     onChange={(event) => setFollow(event.target.value)}
                     placeholder="Which is less spicy?"
+                    aria-label="Ask YumFindAI about these places"
                     autoFocus
+                    {...followGaze.bind}
                   />
                   <button type="submit" className="btn-primary h-11 rounded-xl px-[18px] text-sm shadow-none">
                     Ask
@@ -426,9 +485,9 @@ export function Dashboard() {
                   onClick={() => setShowTrace((open) => !open)}
                   className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent p-0 text-xs font-bold text-tomato hover:underline"
                 >
-                  <Sparkles size={13} strokeWidth={2.75} />
-                  How YumAI decided · {trace.length} SerpApi calls
-                  <ChevronDown size={13} strokeWidth={2.75} className={`transition-transform ${showTrace ? 'rotate-180' : ''}`} />
+                  <LogoMark size={16} />
+                  How YumFindAI decided · {trace.length} SerpApi calls
+                  {showTrace ? <ChevronUp size={13} strokeWidth={2.75} /> : <ChevronDown size={13} strokeWidth={2.75} />}
                 </button>
                 {showTrace ? (
                   <div className="mt-2 max-h-[26vh] overflow-auto rounded-2xl bg-mist px-4 py-3" style={{ animation: 'fadeUp .3s ease backwards' }}>
@@ -446,7 +505,10 @@ export function Dashboard() {
 
         {phase === 'error' ? (
           <div className="sheet max-w-[460px] p-[22px]">
-            <p className="m-0 text-[15px] font-semibold">{error}</p>
+            <div className="flex items-center gap-3.5">
+              <Mascot mood="sad" size={64} steam={false} className="flex-none" />
+              <p className="m-0 text-[15px] font-semibold">{error}</p>
+            </div>
             <div className="mt-3.5 flex gap-2">
               <button onClick={locate} className="btn-primary h-[46px] rounded-xl px-5 shadow-none">
                 Try locate
@@ -717,7 +779,7 @@ function ReviewGroup({ tone, reviews }: { tone: Tone; reviews: Review[] }) {
   );
 }
 
-function Mic({ onText }: { onText: (value: string) => void }) {
+function Mic({ onText, onListening }: { onText: (value: string) => void; onListening?: (on: boolean) => void }) {
   const [listening, setListening] = useState(false);
   const win = window as Window & {
     SpeechRecognition?: new () => SpeechHandle;
@@ -735,8 +797,12 @@ function Mic({ onText }: { onText: (value: string) => void }) {
         const rec = new Ctor();
         rec.lang = 'en-IN';
         rec.onresult = (event) => onText(event.results[0][0].transcript);
-        rec.onend = () => setListening(false);
+        rec.onend = () => {
+          setListening(false);
+          onListening?.(false);
+        };
         setListening(true);
+        onListening?.(true);
         rec.start();
       }}
     >

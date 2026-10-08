@@ -94,7 +94,7 @@ app.post('/api/search', async (c) => {
   );
 });
 
-// Agent routes stream newline-delimited JSON events while YumAI works, ending with {type:"done"}.
+// Agent routes stream newline-delimited JSON events while YumFindAI works, ending with {type:"done"}.
 function streamAgent(c: Parameters<typeof stream>[0], run: (emit: (event: AgentEvent) => void) => Promise<unknown>) {
   c.header('Content-Type', 'application/x-ndjson; charset=utf-8');
   c.header('Cache-Control', 'no-cache');

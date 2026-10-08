@@ -2,7 +2,7 @@ import { env } from './env.js';
 import { words } from './geo.js';
 import type { Place, Points } from './types.js';
 
-const SYSTEM = `You are YumAI, the food finder inside YumFindAI. You speak only as map overlay copy. You are not a chatbot. You never produce a conversation transcript, a greeting thread, or a message history.
+const SYSTEM = `You are YumFindAI, the food finder. You speak only as map overlay copy. You are not a chatbot. You never produce a conversation transcript, a greeting thread, or a message history.
 
 The map is already showing the user's real location and nearby places. Your job is to turn one craving into a ranked set of open restaurants, using only the place and review data the server passes to you.
 
@@ -214,6 +214,12 @@ export type Part =
 
 export type Content = { role: 'user' | 'model'; parts: Part[] };
 
+/** Token counts Gemini reports for one call. `cached` is the part of `prompt` served from Gemini's implicit cache. */
+export type Usage = { prompt: number; cached: number; output: number; thoughts: number };
+
+// Flipped off the first time the model rejects thinkingConfig, so an older model keeps working.
+let thinkingAccepted = true;
+
 /**
  * One model turn with tools. Returns the model's content verbatim (so thought signatures round-trip)
  * or null when the request fails. The caller decides what to do with text and functionCall parts.
@@ -222,27 +228,55 @@ export async function toolTurn(
   system: string,
   contents: Content[],
   tools: FunctionDeclaration[],
-  options: { forceTool?: boolean; timeoutMs?: number } = {},
+  options: { forceTool?: boolean; timeoutMs?: number; onUsage?: (usage: Usage) => void } = {},
 ): Promise<Content | null> {
   if (!env.gemini) return null;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.geminiModel}:generateContent?key=${env.gemini}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(options.timeoutMs ?? 30000),
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents,
-      tools: [{ functionDeclarations: tools }],
-      toolConfig: { functionCallingConfig: { mode: options.forceTool === false ? 'AUTO' : 'ANY' } },
-      generationConfig: { temperature: 0.3 },
-    }),
-  });
+  const send = (thinking: boolean) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(options.timeoutMs ?? 30000),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents,
+        tools: [{ functionDeclarations: tools }],
+        toolConfig: { functionCallingConfig: { mode: options.forceTool === false ? 'AUTO' : 'ANY' } },
+        generationConfig: {
+          temperature: 0.3,
+          ...(thinking ? { thinkingConfig: { thinkingLevel: env.geminiThinking } } : {}),
+        },
+      }),
+    });
+  const thinking = Boolean(env.geminiThinking) && thinkingAccepted;
+  let res = await send(thinking);
+  if (!res.ok && thinking && res.status === 400) {
+    const detail = await res.text();
+    if (!/thinking/i.test(detail)) {
+      console.error('[gemini] tool turn failed', res.status, detail.slice(0, 300));
+      return null;
+    }
+    console.warn(`[gemini] ${env.geminiModel} rejected GEMINI_THINKING=${env.geminiThinking}; continuing without it`);
+    thinkingAccepted = false;
+    res = await send(false);
+  }
   if (!res.ok) {
     console.error('[gemini] tool turn failed', res.status, (await res.text()).slice(0, 300));
     return null;
   }
-  const body = (await res.json()) as { candidates?: { content?: Content }[] };
+  const body = (await res.json()) as {
+    candidates?: { content?: Content }[];
+    usageMetadata?: { promptTokenCount?: number; cachedContentTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+  };
+  const meta = body.usageMetadata;
+  if (meta && options.onUsage) {
+    options.onUsage({
+      prompt: meta.promptTokenCount ?? 0,
+      cached: meta.cachedContentTokenCount ?? 0,
+      output: meta.candidatesTokenCount ?? 0,
+      thoughts: meta.thoughtsTokenCount ?? 0,
+    });
+  }
   const content = body.candidates?.[0]?.content;
   if (!content || !Array.isArray(content.parts)) return null;
   return { role: 'model', parts: content.parts };
