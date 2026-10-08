@@ -46,3 +46,61 @@ export async function api<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) throw new Error(json.error || 'Request failed');
   return json as T;
 }
+
+export type TraceStep = { tool: string; say: string; summary: string };
+export type AgentStep = { id: number; tool: string; say: string; status: 'running' | 'done'; summary?: string };
+export type AgentEvent<T> =
+  | { type: 'step'; id: number; tool: string; say: string; status: 'running' | 'done'; summary?: string }
+  | { type: 'places'; places: Place[] }
+  | { type: 'done'; result: T }
+  | { type: 'error'; message: string };
+
+/** POST to an agent route and read its newline-delimited JSON events as they arrive. Resolves with the `done` result. */
+export async function apiStream<T>(path: string, body: unknown, onEvent: (event: AgentEvent<T>) => void): Promise<T> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(json.error || 'Request failed');
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: T | undefined;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as AgentEvent<T>;
+    if (event.type === 'error') throw new Error(event.message);
+    if (event.type === 'done') result = event.result;
+    onEvent(event);
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index = buffer.indexOf('\n');
+    while (index >= 0) {
+      handle(buffer.slice(0, index));
+      buffer = buffer.slice(index + 1);
+      index = buffer.indexOf('\n');
+    }
+  }
+  handle(buffer);
+  if (result === undefined) throw new Error('The search ended early');
+  return result;
+}
+
+/** Keeps a step list in sync with streamed step events. */
+export function upsertStep(steps: AgentStep[], event: Extract<AgentEvent<unknown>, { type: 'step' }>): AgentStep[] {
+  const next: AgentStep = { id: event.id, tool: event.tool, say: event.say, status: event.status, summary: event.summary };
+  const index = steps.findIndex((step) => step.id === event.id);
+  if (index < 0) return [...steps, next];
+  const copy = steps.slice();
+  copy[index] = next;
+  return copy;
+}

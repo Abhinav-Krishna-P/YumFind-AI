@@ -133,7 +133,7 @@ export function nearbyPlaces(lat: number, lng: number, signal?: AbortSignal) {
 }
 
 export async function cravingPlaces(
-  input: { q: string; lat: number; lng: number; radiusM: number; wantsBest: boolean },
+  input: { q: string; lat: number; lng: number; radiusM: number; wantsBest: boolean; openNow?: boolean },
   signal?: AbortSignal,
 ) {
   return maps(
@@ -145,11 +145,34 @@ export async function cravingPlaces(
       lon: input.lng,
       m: input.radiusM,
       nearby: true,
-      open_state: 'now',
+      ...(input.openNow === false ? {} : { open_state: 'now' }),
       ...(input.wantsBest ? { min_rating: '4.0' } : {}),
     },
     signal,
   );
+}
+
+export type WebHit = { title: string; link: string; snippet: string };
+
+/** Google organic search (engine=google): local food blogs, news, "best X in Y" lists. */
+export async function webSearch(q: string, signal?: AbortSignal): Promise<WebHit[]> {
+  try {
+    const body = await callSerp(
+      { engine: 'google', q, num: 8, json_restrictor: 'organic_results[].{title,link,snippet}' },
+      signal,
+    );
+    const rows = Array.isArray(body.organic_results) ? body.organic_results : [];
+    return rows
+      .map((row) => {
+        const item = (row || {}) as Record<string, unknown>;
+        return { title: text(item.title) || '', link: text(item.link) || '', snippet: text(item.snippet) || '' };
+      })
+      .filter((hit) => hit.title && hit.snippet)
+      .slice(0, 8);
+  } catch (error) {
+    if (noResults(error)) return [];
+    throw error;
+  }
 }
 
 function reviewDate(review: Record<string, unknown>) {
@@ -179,10 +202,23 @@ export async function recentReviews(
   reviewWith: { data_id?: string; place_id?: string },
   signal?: AbortSignal,
 ): Promise<Review[]> {
-  if (!reviewWith.data_id && !reviewWith.place_id) return [];
+  return (await reviewPages(reviewWith, signal)).reviews;
+}
+
+/**
+ * Newest-first reviews from the last 3 months. Resumable: pass `startToken` from a previous
+ * call's `nextToken` to read further pages without paying for the first page again.
+ */
+export async function reviewPages(
+  reviewWith: { data_id?: string; place_id?: string },
+  signal?: AbortSignal,
+  options: { maxPages?: number; startToken?: string } = {},
+): Promise<{ reviews: Review[]; nextToken: string | null; sawOld: boolean }> {
+  if (!reviewWith.data_id && !reviewWith.place_id) return { reviews: [], nextToken: null, sawOld: false };
   const collected: Review[] = [];
-  let token: string | undefined;
-  for (let page = 0; page < 3; page += 1) {
+  let token: string | undefined = options.startToken;
+  let sawOld = false;
+  for (let page = 0; page < (options.maxPages ?? 3); page += 1) {
     const body = await callSerp(
       {
         engine: 'google_maps_reviews',
@@ -193,8 +229,10 @@ export async function recentReviews(
       signal,
     );
     const rows = Array.isArray(body.reviews) ? body.reviews : [];
-    if (!rows.length) break;
-    let sawOld = false;
+    if (!rows.length) {
+      token = undefined;
+      break;
+    }
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       const review = row as Record<string, unknown>;
@@ -226,7 +264,7 @@ export async function recentReviews(
     token = text(pagination?.next_page_token) || undefined;
     if (!token || sawOld) break;
   }
-  return collected;
+  return { reviews: collected, nextToken: sawOld ? null : token || null, sawOld };
 }
 
 export type DrivingRoute = {

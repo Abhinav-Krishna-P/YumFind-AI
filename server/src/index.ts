@@ -1,10 +1,13 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { stream } from 'hono/streaming';
+import { runFollowUpAgent, runSearchAgent, type AgentEvent } from './agent.js';
 import { env } from './env.js';
 import { validCoord } from './geo.js';
 import { askFollowUp, cleanLists, findFood, findNearby } from './pipeline.js';
 import { assertHospitality } from './topic.js';
+import { placeName } from './reverse.js';
 import { drivingRoute } from './serp.js';
 import { authClient, recordVisit } from './store.js';
 import { HttpError, type Actor } from './types.js';
@@ -91,6 +94,68 @@ app.post('/api/search', async (c) => {
   );
 });
 
+// Agent routes stream newline-delimited JSON events while YumAI works, ending with {type:"done"}.
+function streamAgent(c: Parameters<typeof stream>[0], run: (emit: (event: AgentEvent) => void) => Promise<unknown>) {
+  c.header('Content-Type', 'application/x-ndjson; charset=utf-8');
+  c.header('Cache-Control', 'no-cache');
+  c.header('X-Accel-Buffering', 'no');
+  return stream(c, async (out) => {
+    const write = async (event: AgentEvent) => {
+      await out.write(`${JSON.stringify(event)}\n`);
+    };
+    const queue: Promise<void>[] = [];
+    try {
+      await run((event) => {
+        queue.push(write(event).catch(() => undefined));
+      });
+    } catch (error) {
+      const message = error instanceof HttpError ? error.message : 'Search is unavailable';
+      if (!(error instanceof HttpError)) console.error(error);
+      await write({ type: 'error', message });
+    }
+    await Promise.all(queue);
+  });
+}
+
+app.post('/api/agent/search', async (c) => {
+  const user = await actor(c);
+  const body = await c.req.json<{
+    craving?: string;
+    lat?: number;
+    lng?: number;
+    radiusM?: number;
+    preferences?: unknown;
+    addons?: unknown;
+    locationLabel?: string;
+  }>();
+  const lat = Number(body.lat);
+  const lng = Number(body.lng);
+  const radiusM = Number(body.radiusM);
+  if (!validCoord(lat, lng)) throw new HttpError(400, 'Need a location');
+  if (!RADII.has(radiusM)) throw new HttpError(400, 'Pick a radius');
+  const lists = cleanLists(body.preferences, body.addons);
+  const input = {
+    craving: String(body.craving || '').slice(0, 200),
+    lat,
+    lng,
+    radiusM,
+    ...lists,
+    locationLabel: typeof body.locationLabel === 'string' ? body.locationLabel.slice(0, 80) : undefined,
+  };
+  return streamAgent(c, (emit) => runSearchAgent(user, input, emit));
+});
+
+app.post('/api/agent/followup', async (c) => {
+  const user = await actor(c);
+  const body = await c.req.json<{ fingerprint?: string; question?: string; lat?: number; lng?: number }>();
+  const question = String(body.question || '').trim().slice(0, 240);
+  if (!body.fingerprint || !question) throw new HttpError(400, 'Ask about the places on the map');
+  const lat = Number(body.lat);
+  const lng = Number(body.lng);
+  const input = { fingerprint: body.fingerprint, question, ...(validCoord(lat, lng) ? { lat, lng } : {}) };
+  return streamAgent(c, (emit) => runFollowUpAgent(user, input, emit));
+});
+
 app.post('/api/followup', async (c) => {
   const user = await actor(c);
   const body = await c.req.json<{ fingerprint?: string; question?: string }>();
@@ -114,6 +179,16 @@ app.post('/api/directions', async (c) => {
       AbortSignal.timeout(15000),
     ),
   );
+});
+
+app.post('/api/where', async (c) => {
+  await actor(c);
+  const body = await c.req.json<{ lat?: number; lng?: number }>();
+  const lat = Number(body.lat);
+  const lng = Number(body.lng);
+  if (!validCoord(lat, lng)) throw new HttpError(400, 'Need a location');
+  const label = await placeName(lat, lng, AbortSignal.timeout(8000)).catch(() => null);
+  return c.json({ label });
 });
 
 app.post('/api/visits', async (c) => {

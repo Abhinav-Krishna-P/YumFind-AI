@@ -7,7 +7,7 @@ const HOSPITALITY =
   /\b(restaurant|restaurants|hotel|hotels|cafe|cafes|coffee|tea|food|eat|eating|dish|dishes|meal|meals|lunch|dinner|breakfast|brunch|snack|hungry|cuisine|dining|bakery|buffet|thali|veg|vegetarian|spicy|mandi|mandhi|manthi|biryani|biriyani|dosa|idli|pizza|burger|chicken|mutton|beef|fish|seafood|rice|noodle|noodles|chinese|indian|arabic|kebab|shawarma|grill|bar|pub|dessert|sweet|sweets|juice|icecream|kitchen|lodge|resort|stay|stays|room|rooms|homestay|inn|porotta|parotta|alfaham|tandoori|curry|soup|salad|fries|sandwich|pasta|sushi|ramen|momo|chaat|paneer|dal|roti|naan|cake|pastry|milkshake|smoothie|breakfast|supper|cuisine)\b/i;
 
 const FOLLOW_UP =
-  /\b(closer|nearest|cheaper|parking|outdoor|seating|rating|review|reviews|distance|walking|taste|tasty|flavour|flavor|portion|service|clean|hygiene|crowd|crowded|quiet|takeaway|delivery|dine)\b/i;
+  /\b(closer|closest|close|near|nearest|far|road|drive|driving|minutes|cheaper|cheapest|cheap|budget|price|pricey|expensive|parking|outdoor|seating|rating|rated|review|reviews|distance|walking|walk|taste|tasty|flavour|flavor|portion|portions|service|clean|hygiene|crowd|crowded|busy|quiet|takeaway|delivery|dine|family|families|kids|children|group|friends|date|couple|ambience|ambiance|vibe|open|hours|late|which|best|better|recommend|pick|choose|less|more|mild|hot)\b/i;
 
 const OFF_TOPIC =
   /\b(python|javascript|typescript|programming|homework|weather|forecast|stock|crypto|bitcoin|president|prime minister|capital of|translate|poem|lyrics|song|equation|password|hack|exploit|malware|movie|cricket|football|news|who won|write code|write a)\b/i;
@@ -22,6 +22,13 @@ export async function assertHospitality(text: string, mode: 'search' | 'followup
   if (!message) throw new HttpError(400, REJECT);
   if (OFF_TOPIC.test(message)) throw new HttpError(400, REJECT);
   if (onTopic(message, mode)) return;
-  const allowed = await topicAllowed(message, mode);
+  let allowed: boolean;
+  try {
+    allowed = await topicAllowed(message, mode);
+  } catch (error) {
+    console.error('[topic] gate unavailable', error instanceof Error ? error.message : error);
+    // The gate is a courtesy filter. A follow-up can only be answered from places already on the map, so let it through.
+    allowed = mode === 'followup';
+  }
   if (!allowed) throw new HttpError(400, REJECT);
 }

@@ -1,0 +1,81 @@
+import { Utensils } from 'lucide-react';
+import { useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
+
+export const foodImg = (id: string) => `https://images.unsplash.com/photo-${id}?w=700&h=700&q=70&auto=format&fit=crop`;
+
+export const CATEGORIES = [
+  ['Biryani', '1563379091339-03b21ab4a4f8'],
+  ['Pizza', '1574071318508-1cdbab80d002'],
+  ['Dosa', '1668236543090-82eba5ee5976'],
+  ['Burger', '1571091718767-18b5b1457add'],
+  ['Dessert', '1563805042-7684c019e1cb'],
+  ['Pasta', '1621996346565-e3dbc646d9a9'],
+  ['Idly', '1589301760014-d929f3979dbc'],
+  ['Samosa', '1601050690597-df0568f70950'],
+].map(([label, id]) => ({ label, img: foodImg(id) }));
+
+export function Logo({ size = 38, text = 23, to = '/' }: { size?: number; text?: number; to?: string }) {
+  return (
+    <Link to={to} className="flex items-center gap-2.5 text-ink no-underline hover:text-ink">
+      <span
+        className="grid place-items-center text-white"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size * 0.32,
+          background: 'var(--grad)',
+          boxShadow: '0 6px 16px rgba(255,61,84,.35)',
+        }}
+      >
+        <Utensils size={size * 0.52} strokeWidth={2.5} />
+      </span>
+      <span className="font-display font-bold tracking-[-.01em]" style={{ fontSize: text }}>
+        YumFind<span className="text-tomato">AI</span>
+      </span>
+    </Link>
+  );
+}
+
+/** Image on a warm gradient; hides itself if the URL fails so the gradient shows through. */
+export function Photo({
+  src,
+  className = '',
+  imgClassName = '',
+  style,
+}: {
+  src: string | null | undefined;
+  className?: string;
+  imgClassName?: string;
+  style?: CSSProperties;
+}) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className={`photo ${className}`} style={style}>
+      {src && !failed ? (
+        <img className={imgClassName} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      ) : null}
+    </div>
+  );
+}
+
+/** Food photo inside a gradient ring, used for craving categories. */
+export function FoodRing({ src, size, ring = 4, border = 3 }: { src: string; size: number | string; ring?: number; border?: number }) {
+  return (
+    <span
+      className="block flex-none rounded-full"
+      style={{ width: size, height: size, padding: ring, background: 'var(--grad-ring)', boxShadow: '0 12px 28px rgba(255,122,61,.22)' }}
+    >
+      <Photo src={src} className="h-full w-full rounded-full bg-peach" style={{ border: `${border}px solid #fff`, background: 'var(--color-peach)' }} />
+    </span>
+  );
+}
+
+export function LiveDot({ color, size = 10 }: { color: string; size?: number }) {
+  return (
+    <span className="relative flex-none" style={{ width: size, height: size }}>
+      <span className="absolute inset-0 rounded-full" style={{ background: color }} />
+      <span className="absolute inset-0 rounded-full" style={{ background: color, animation: 'pulse 1.6s ease-out infinite' }} />
+    </span>
+  );
+}

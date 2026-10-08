@@ -53,12 +53,15 @@ export type Place = {
   evidence: Evidence[];
 };
 
+export type TraceStep = { tool: string; say: string; summary: string };
+
 export type Snapshot = {
   fingerprint: string;
   headline: string;
   reason: string;
   places: Place[];
   expiresAt: number;
+  trace?: TraceStep[];
 };
 
 export type Actor = {

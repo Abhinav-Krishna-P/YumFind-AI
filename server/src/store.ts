@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { env } from './env.js';
-import type { Actor, Place, Review, Snapshot } from './types.js';
+import type { Actor, Place, Review, Snapshot, TraceStep } from './types.js';
 
 const nearbyMem = new Map<string, { expires: number; places: Place[] }>();
 const searchMem = new Map<string, Snapshot>();
@@ -186,6 +186,7 @@ export async function saveSearchSnapshot(actor: Actor, snapshot: Snapshot) {
     score_json: {
       headline: snapshot.headline,
       reason: snapshot.reason,
+      trace: snapshot.trace || [],
       places: snapshot.places.map((place) => ({
         id: place.id,
         points: place.points,
@@ -253,6 +254,7 @@ export async function readSearchStore(actor: Actor, fingerprint: string) {
   const score = data.score_json as {
     headline?: string;
     reason?: string;
+    trace?: TraceStep[];
     places?: { id: string; points: Place['points']; verdict: string | null; evidence: Place['evidence']; distanceM: number | null }[];
   };
   const meta = new Map((score.places || []).map((place) => [place.id, place]));
@@ -270,6 +272,7 @@ export async function readSearchStore(actor: Actor, fingerprint: string) {
     reason: score.reason || 'Loaded from the saved search.',
     places,
     expiresAt: new Date(data.expires_at).getTime(),
+    trace: score.trace || [],
   };
   rememberSearch(snapshot);
   return snapshot;

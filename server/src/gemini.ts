@@ -166,7 +166,7 @@ Return JSON only: {"allowed":true} or {"allowed":false}.`;
 
 export async function topicAllowed(text: string, mode: 'search' | 'followup') {
   if (!env.gemini) return false;
-  const raw = await generate(GATE, `mode: ${mode}\nmessage: ${text.slice(0, 240)}`, 8000);
+  const raw = await generate(GATE, `mode: ${mode}\nmessage: ${text.slice(0, 240)}`, 15000);
   if (!raw) return false;
   try {
     const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '')) as { allowed?: boolean };
@@ -197,4 +197,53 @@ export async function embedTexts(texts: string[]) {
   }
   const body = (await res.json()) as { embeddings?: { values?: number[] }[] };
   return texts.map((_, index) => body.embeddings?.[index]?.values ?? null);
+}
+
+// ---- Function calling (used by the agent loop) ----
+
+export type FunctionDeclaration = {
+  name: string;
+  description: string;
+  parameters: { type: 'OBJECT'; properties: Record<string, unknown>; required?: string[] };
+};
+
+export type Part =
+  | { text: string; thoughtSignature?: string }
+  | { functionCall: { name: string; args: Record<string, unknown> }; thoughtSignature?: string }
+  | { functionResponse: { name: string; response: Record<string, unknown> } };
+
+export type Content = { role: 'user' | 'model'; parts: Part[] };
+
+/**
+ * One model turn with tools. Returns the model's content verbatim (so thought signatures round-trip)
+ * or null when the request fails. The caller decides what to do with text and functionCall parts.
+ */
+export async function toolTurn(
+  system: string,
+  contents: Content[],
+  tools: FunctionDeclaration[],
+  options: { forceTool?: boolean; timeoutMs?: number } = {},
+): Promise<Content | null> {
+  if (!env.gemini) return null;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.geminiModel}:generateContent?key=${env.gemini}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(options.timeoutMs ?? 30000),
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents,
+      tools: [{ functionDeclarations: tools }],
+      toolConfig: { functionCallingConfig: { mode: options.forceTool === false ? 'AUTO' : 'ANY' } },
+      generationConfig: { temperature: 0.3 },
+    }),
+  });
+  if (!res.ok) {
+    console.error('[gemini] tool turn failed', res.status, (await res.text()).slice(0, 300));
+    return null;
+  }
+  const body = (await res.json()) as { candidates?: { content?: Content }[] };
+  const content = body.candidates?.[0]?.content;
+  if (!content || !Array.isArray(content.parts)) return null;
+  return { role: 'model', parts: content.parts };
 }

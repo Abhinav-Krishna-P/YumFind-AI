@@ -123,7 +123,7 @@ export async function findNearby(actor: Actor, lat: number, lng: number) {
   return { cacheHit: false, places: saved.map(present) };
 }
 
-async function embedLater(actor: Actor, places: Place[]) {
+export async function embedLater(actor: Actor, places: Place[]) {
   const rows = places.flatMap((place) =>
     place.reviews.slice(0, 6).map((review) => ({
       placeId: place.id,
