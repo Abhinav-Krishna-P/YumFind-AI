@@ -3,28 +3,40 @@ import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Masco
 import { SnapButton, type SnapState } from '@/components/SnapButton';
 import { useSession } from '@/lib/session';
 import { currentPosition, placeNameFor, readSpot, saveSpot, type Spot } from '@/lib/spot';
-import { ArrowRight, BadgeCheck, Camera, Check, Heart, LocateFixed, MessageSquareText, Search, Sparkles } from 'lucide-react';
+import { ArrowRight, BookOpen, Camera, Check, Heart, LocateFixed, Search, Sparkles } from 'lucide-react';
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 const QUICK_PICKS = ['Mild chicken biryani', 'Spicy beef fry', 'Pure veg thali', 'Quiet cafe'];
 const HEADLINE = ['Food', 'that', 'fits'];
 
-const WHY = [
+type Feature = { id: 'match' | 'twins' | 'snap' | 'menu'; icon: typeof Heart; title: string; text: string };
+
+/** The four things a map app does not do; each card carries a small preview of the real UI. */
+const FEATURES: Feature[] = [
   {
+    id: 'match',
+    icon: Sparkles,
+    title: "The best match, from this month's reviews",
+    text: 'An AI agent searches Google Maps, reads the newest reviews for your exact dish and how you like it, and ranks only what the evidence backs. Every pick says why.',
+  },
+  {
+    id: 'twins',
     icon: Heart,
-    title: 'Learns your taste',
-    text: 'Mild or spicy, veg, family dinners, quick bites. YumFindAI remembers how you like it, so every search gets more personal.',
+    title: 'Taste Twins',
+    text: 'A 4.5★ average mixes everyone. YumFindAI finds the reviewers who eat like you, reads their review history, and shows what they said about each place.',
   },
   {
-    icon: MessageSquareText,
-    title: "Reads this month's reviews",
-    text: 'Not a star average: what people said recently about the exact dish you want, at each place.',
+    id: 'snap',
+    icon: Camera,
+    title: 'Snap a dish',
+    text: 'Saw it on Instagram? Take or upload a photo. Google Lens names the dish and YumFindAI finds who makes it best near you.',
   },
   {
-    icon: BadgeCheck,
-    title: 'Explains every match',
-    text: "Each pick says why it suits you, which dishes reviewers love, and whether it's open when you get there.",
+    id: 'menu',
+    icon: BookOpen,
+    title: 'Menu & prices',
+    text: 'Restaurants post their menu as photos on Google Maps. YumFindAI reads them into a searchable price list, with your dish on top.',
   },
 ];
 
@@ -216,7 +228,7 @@ export function Home() {
             </span>
           </h1>
           <p className="m-0 max-w-[480px] text-lg leading-relaxed text-muted [text-wrap:pretty]" style={{ animation: 'fadeUp .7s ease .5s backwards' }}>
-            Google Maps lists everything around you. YumFindAI finds the few that fit you: it reads this month's reviews for the dish you want, remembers how you like it, and explains why each pick suits you.
+            Google Maps lists everything around you. YumFindAI picks what fits you: it reads this month's reviews for your dish, finds reviewers who eat like you, reads the menu prices, and can even start from a photo of a dish.
           </p>
           {spot ? (
             <div className="flex max-w-[560px] flex-col gap-3" style={{ animation: 'fadeUp .5s ease backwards' }}>
@@ -301,21 +313,29 @@ export function Home() {
       </section>
 
       <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-4 pt-6">
-        <h2 className="m-0 font-display text-[28px] font-semibold tracking-[-.01em]">Not another map. A match for your taste.</h2>
-        <p className="m-0 mt-1 max-w-[640px] text-[15px] text-muted">A map shows what is near. YumFindAI works out what is right for you.</p>
-        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4">
-          {WHY.map(({ icon: Icon, title, text }, i) => (
-            <div
-              key={title}
-              className="rounded-[22px] bg-white p-5"
-              style={{ boxShadow: '0 0 0 1px #f1edf2', animation: `fadeUp .5s ease ${i * 80}ms backwards` }}
+        <p className="m-0 text-[13px] font-extrabold uppercase tracking-[.1em] text-tomato">What a map app can't do</p>
+        <h2 className="m-0 mt-1 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-[-.015em]">Not another map. A match for your taste.</h2>
+        <p className="m-0 mt-1.5 max-w-[680px] text-base text-muted">
+          A map shows what is near. YumFindAI works out what is right for you, and shows the evidence.
+        </p>
+        <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+          {FEATURES.map((feature, i) => (
+            <article
+              key={feature.id}
+              className="flex flex-col rounded-[26px] bg-white p-5 sm:p-6"
+              style={{ boxShadow: '0 0 0 1px #f1edf2, 0 18px 40px rgba(28,26,31,.06)', animation: `fadeUp .5s ease ${i * 80}ms backwards` }}
             >
-              <span className="grid h-10 w-10 place-items-center rounded-xl text-white" style={{ background: 'var(--grad)' }}>
-                <Icon size={19} strokeWidth={2.5} />
-              </span>
-              <p className="m-0 mt-3 font-display text-lg font-semibold">{title}</p>
-              <p className="m-0 mt-1 text-sm leading-relaxed text-muted">{text}</p>
-            </div>
+              <div className="flex items-center gap-3">
+                <span className="grid h-11 w-11 flex-none place-items-center rounded-2xl text-white" style={{ background: 'var(--grad)' }}>
+                  <feature.icon size={20} strokeWidth={2.5} />
+                </span>
+                <h3 className="m-0 font-display text-xl font-semibold leading-tight">{feature.title}</h3>
+              </div>
+              <p className="m-0 mt-3 text-[15px] leading-relaxed text-muted">{feature.text}</p>
+              <div className="mt-4 flex-1 rounded-2xl bg-mist p-3.5" aria-hidden="true">
+                <FeaturePreview id={feature.id} />
+              </div>
+            </article>
           ))}
         </div>
       </section>
@@ -344,6 +364,75 @@ export function Home() {
         </div>
       </footer>
     </main>
+  );
+}
+
+/** Small, static previews of each feature, drawn from what the app really shows. */
+function FeaturePreview({ id }: { id: Feature['id'] }) {
+  if (id === 'match') {
+    return (
+      <div className="flex gap-3 rounded-xl bg-white p-2.5">
+        <Photo src={foodImg('1563379091339-03b21ab4a4f8')} className="h-16 w-16 flex-none rounded-xl" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-display text-[15px] font-semibold">Malabar Menu</span>
+            <span className="rating-badge flex-none">★ 4.6</span>
+          </div>
+          <p className="m-0 mt-0.5 text-xs leading-snug text-ink-2">Reviewers this month praise the consistently good dum biryani.</p>
+          <span className="mt-1.5 inline-block rounded-full bg-peach px-2 py-px text-[11px] font-bold text-tomato-deep">chicken dum biryani</span>
+        </div>
+      </div>
+    );
+  }
+  if (id === 'twins') {
+    return (
+      <div className="rounded-xl bg-[#fff0f3] p-2.5">
+        <div className="flex gap-2.5 rounded-lg bg-white p-2.5">
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-full font-display font-bold" style={{ background: 'var(--grad-coin)' }}>
+            A
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
+              Arjun <span className="rounded-full bg-[#c2185b] px-1.5 py-px text-[10px] text-white">78% match</span>
+            </div>
+            <p className="m-0 mt-0.5 text-xs text-muted">Loved the chicken dum biryani and rates family places highly</p>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] font-bold text-[#c2185b]">
+          <Heart size={12} strokeWidth={2.75} className="fill-current" /> 2 taste twins loved it
+        </div>
+      </div>
+    );
+  }
+  if (id === 'snap') {
+    return (
+      <div className="flex items-center gap-3">
+        <Photo src={foodImg('1668236543090-82eba5ee5976')} className="h-20 w-20 flex-none rounded-xl" />
+        <ArrowRight size={18} strokeWidth={2.75} className="flex-none text-faint" />
+        <div className="min-w-0 rounded-xl bg-white p-2.5">
+          <p className="m-0 flex items-center gap-1.5 text-[11px] font-bold text-muted">
+            <Camera size={12} strokeWidth={2.75} /> Google Lens
+          </p>
+          <p className="m-0 font-display text-[15px] font-semibold">Looks like masala dosa</p>
+          <p className="m-0 text-[11px] font-semibold text-leaf">95% sure · finding it near you</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl bg-white px-3 py-2">
+      <p className="m-0 text-[10px] font-bold uppercase tracking-[.06em] text-tomato-deep">Matches your craving</p>
+      {[
+        ['Chicken biriyani · half', 110],
+        ['Chicken biriyani · full', 150],
+        ['Beef biriyani · full', 150],
+      ].map(([dish, cost]) => (
+        <div key={dish} className="flex items-baseline gap-2 border-b border-line py-1.5 text-[13px] last:border-0">
+          <span className="min-w-0 flex-1 font-semibold">{dish}</span>
+          <span className="font-bold tabular-nums">₹{cost}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -424,14 +513,22 @@ function HeroArt({
         className="absolute bottom-[4%] left-[2%] flex items-center gap-3 rounded-[20px] bg-white py-2.5 pl-2.5 pr-[18px] max-sm:hidden"
         style={{ boxShadow: '0 20px 44px rgba(28,26,31,.16)', animation: 'popIn .6s cubic-bezier(.2,1.4,.4,1) 1.05s backwards' }}
       >
-        <Photo src={foodImg('1563379091339-03b21ab4a4f8')} className="h-14 w-14 rounded-[14px]" />
+        <span className="grid h-12 w-12 flex-none place-items-center rounded-full font-display text-lg font-bold text-ink" style={{ background: 'var(--grad-coin)' }}>
+          A
+        </span>
         <div>
-          <div className="font-display text-[17px] font-semibold">Mild biryani, family-friendly</div>
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted">
-            <span className="rating-badge px-[7px] py-0.5">★ 4.5</span>
-            Matches your taste
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#c2185b]">
+            <Heart size={12} strokeWidth={2.75} className="fill-current" /> Your taste twin · 82% match
           </div>
+          <div className="font-display text-[16px] font-semibold">"The mild dum biryani is spot on"</div>
         </div>
+      </div>
+      <div
+        className="absolute bottom-[17%] right-[1%] flex items-center gap-2 rounded-2xl bg-white px-3 py-2 text-[13px] font-bold max-sm:hidden"
+        style={{ boxShadow: '0 16px 36px rgba(28,26,31,.14)', animation: 'popIn .6s cubic-bezier(.2,1.4,.4,1) 1.3s backwards' }}
+      >
+        <BookOpen size={15} strokeWidth={2.5} className="text-tomato" />
+        Chicken biriyani <span className="text-tomato-deep">₹150</span>
       </div>
     </div>
   );

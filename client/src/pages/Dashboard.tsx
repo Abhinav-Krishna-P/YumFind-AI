@@ -10,7 +10,7 @@ import { useSession } from '@/lib/session';
 import { readSpot, saveSpot } from '@/lib/spot';
 import { estimateDriveMin, parseDuration, timing, type Timing } from '@/lib/hours';
 import { distanceLabel, rupees } from '@/lib/utils';
-import { BadgeCheck, Clock, ChevronDown, Heart, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
+import { BadgeCheck, BookOpen, Camera, Clock, ChevronDown, Heart, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -439,7 +439,18 @@ export function Dashboard() {
             </div>
             {snap.status === 'working' ? <p className="mb-0 mt-3 text-xs font-semibold text-tomato">Looking at your photo with Google Lens...</p> : null}
             {snap.status === 'error' ? <p className="mb-0 mt-3 text-xs font-semibold text-[#d42a35]">{snap.message}</p> : null}
-            <p className="mb-0 mt-3 text-xs text-faint">Food, restaurants, and hotels only. Tap the camera to search by a photo of a dish.</p>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-bold">
+              <span className="inline-flex items-center gap-1 rounded-full bg-blush px-2.5 py-1 text-tomato-deep">
+                <Camera size={12} strokeWidth={2.75} /> Snap a dish with the camera
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#fff0f3] px-2.5 py-1 text-[#c2185b]">
+                <Heart size={12} strokeWidth={2.75} className="fill-current" /> Taste twins on every search
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-peach px-2.5 py-1 text-tomato-deep">
+                <BookOpen size={12} strokeWidth={2.75} /> Menus with prices
+              </span>
+            </div>
+            <p className="mb-0 mt-2 text-xs text-faint">Food, restaurants, and hotels only.</p>
           </div>
         ) : null}
 

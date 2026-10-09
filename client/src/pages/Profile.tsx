@@ -1,12 +1,15 @@
 import { Logo, Photo, useTitle } from '@/components/brand';
 import { Mascot } from '@/components/mascot/Mascot';
 import { supabase } from '@/lib/supabase';
-import { LogOut, Map as MapIcon, Utensils } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LogOut, Map as MapIcon, Utensils } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 type PlaceRef = { name: string; thumbnail: string | null };
-type Visit = { visited_at: string; places: PlaceRef | PlaceRef[] | null };
+type Visit = { place_id: string; visited_at: string; places: PlaceRef | PlaceRef[] | null };
+type VisitRow = { id: string; name: string; thumbnail: string | null; at: Date; times: number };
+
+const PAGE_SIZE = 8;
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -19,7 +22,8 @@ export function Profile() {
   const [avatar, setAvatar] = useState<string | null>(null);
   const [searches, setSearches] = useState(0);
   const [opened, setOpened] = useState(0);
-  const [visits, setVisits] = useState<{ name: string; thumbnail: string | null; at: Date }[]>([]);
+  const [visits, setVisits] = useState<VisitRow[]>([]);
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -32,19 +36,30 @@ export function Profile() {
       setAvatar(profile?.avatar_url ?? null);
       const { count } = await supabase.from('searches').select('id', { count: 'exact', head: true });
       setSearches(count || 0);
-      const { count: visitCount } = await supabase.from('place_visits').select('id', { count: 'exact', head: true });
-      setOpened(visitCount || 0);
       const { data: rows } = await supabase
         .from('place_visits')
-        .select('visited_at, places(name, thumbnail)')
+        .select('place_id, visited_at, places(name, thumbnail)')
         .order('visited_at', { ascending: false })
-        .limit(10);
-      setVisits(
-        ((rows || []) as Visit[]).map((row) => {
-          const place = Array.isArray(row.places) ? row.places[0] : row.places;
-          return { name: place?.name || 'Place', thumbnail: place?.thumbnail ?? null, at: new Date(row.visited_at) };
-        }),
-      );
+        .limit(500);
+      // One row per place: its latest visit, plus how often it was opened.
+      const byPlace = new Map<string, VisitRow>();
+      for (const row of (rows || []) as Visit[]) {
+        const known = byPlace.get(row.place_id);
+        if (known) {
+          known.times += 1;
+          continue;
+        }
+        const place = Array.isArray(row.places) ? row.places[0] : row.places;
+        byPlace.set(row.place_id, {
+          id: row.place_id,
+          name: place?.name || 'Place',
+          thumbnail: place?.thumbnail ?? null,
+          at: new Date(row.visited_at),
+          times: 1,
+        });
+      }
+      setVisits([...byPlace.values()]);
+      setOpened(byPlace.size);
     }
     void load();
   }, []);
@@ -111,8 +126,8 @@ export function Profile() {
             </div>
           ) : (
             <ul className="m-0 mt-4 list-none divide-y divide-line p-0">
-              {visits.map((visit) => (
-                <li key={`${visit.name}-${visit.at.getTime()}`} className="flex items-center gap-4 py-3">
+              {visits.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE).map((visit) => (
+                <li key={visit.id} className="flex items-center gap-4 py-3">
                   {visit.thumbnail ? (
                     <Photo src={visit.thumbnail} className="h-12 w-12 flex-none rounded-xl" />
                   ) : (
@@ -120,7 +135,10 @@ export function Profile() {
                       <Utensils size={20} strokeWidth={2.25} />
                     </span>
                   )}
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{visit.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-semibold">{visit.name}</span>
+                    {visit.times > 1 ? <span className="block text-xs font-medium text-faint">Opened {visit.times} times</span> : null}
+                  </span>
                   <span className="flex-none text-right text-[13px] leading-tight text-muted">
                     {dateFormat.format(visit.at)}
                     <br />
@@ -130,6 +148,24 @@ export function Profile() {
               ))}
             </ul>
           )}
+          {visits.length > PAGE_SIZE ? (
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3">
+              <button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} className="btn-outline h-9 px-3 text-[13px] disabled:cursor-default disabled:opacity-40">
+                <ChevronLeft size={15} strokeWidth={2.5} /> Previous
+              </button>
+              <span className="text-[13px] font-semibold text-muted">
+                Page {page + 1} of {Math.ceil(visits.length / PAGE_SIZE)} · {visits.length} places
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((value) => Math.min(Math.ceil(visits.length / PAGE_SIZE) - 1, value + 1))}
+                disabled={(page + 1) * PAGE_SIZE >= visits.length}
+                className="btn-outline h-9 px-3 text-[13px] disabled:cursor-default disabled:opacity-40"
+              >
+                Next <ChevronRight size={15} strokeWidth={2.5} />
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
     </main>
