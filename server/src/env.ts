@@ -20,6 +20,8 @@ loadEnvFile(resolve(process.cwd(), '../.env'));
 
 export const env = {
   port: Number(process.env.PORT || 8787),
+  /** Interface the API listens on; keep 127.0.0.1 unless you deploy behind a proxy. */
+  host: process.env.API_HOST || '127.0.0.1',
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseKey: process.env.SUPABASE_PUBLISHABLE_KEY || '',
   serviceRole: process.env.SUPABASE_SERVICE_ROLE_KEY || '',

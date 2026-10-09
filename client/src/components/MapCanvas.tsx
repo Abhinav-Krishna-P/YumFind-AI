@@ -1,4 +1,5 @@
-import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import type { GeoJSONSource } from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
 
 export type RoutePoint = { lat: number; lng: number };
@@ -75,6 +76,8 @@ function fitPlaces(map: maplibregl.Map, user: RoutePoint | null, places: MapPoin
 export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: Props) {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  // Set once the style has loaded; isStyleLoaded() also turns false while tiles stream in, which used to skip routes.
+  const ready = useRef(false);
   const markers = useRef<maplibregl.Marker[]>([]);
   const pinIds = useRef('');
   const routeRaf = useRef(0);
@@ -99,7 +102,10 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     const resize = () => map.resize();
-    map.on('load', resize);
+    map.on('load', () => {
+      ready.current = true;
+      resize();
+    });
     window.addEventListener('resize', resize);
     map.on('click', (event) => {
       if (!dropRef.current) return;
@@ -144,7 +150,7 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
         essential: true,
       });
     };
-    if (map.isStyleLoaded()) fly();
+    if (ready.current) fly();
     else map.once('load', fly);
   }, [user]);
 
@@ -235,7 +241,7 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
         maxZoom: 15.5,
       });
     };
-    if (map.isStyleLoaded()) apply();
+    if (ready.current) apply();
     else map.once('load', apply);
   }, [route]);
 

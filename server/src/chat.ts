@@ -119,8 +119,8 @@ export async function forget(userId: string) {
  * A first question is shared across users with the same memory; later ones are per conversation.
  * The prompt version is part of the key, so changing the prompts retires old answers.
  */
-export function answerKey(fingerprint: string, question: string, messages: ChatMessage[], memory: string[]) {
+export function answerKey(fingerprint: string, question: string, messages: ChatMessage[], memory: string[], near = '') {
   const last = [...messages].reverse().find((message) => message.role === 'assistant');
   const context = last ? `${normalize(last.text).slice(0, 80)}>${last.placeName ?? ''}` : '';
-  return `answer:${PROMPT_VERSION}:${fingerprint}|${normalize(question)}|${context}|${memory.join(',')}`;
+  return `answer:${PROMPT_VERSION}:${fingerprint}|${normalize(question)}|${context}|${memory.join(',')}|${near}`;
 }

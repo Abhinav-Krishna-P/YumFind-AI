@@ -23,7 +23,7 @@ const ADDONS = new Set(['parking', 'outdoor seating', 'pure veg kitchen']);
 
 export function cleanLists(preferences: unknown, addons: unknown) {
   const list = (value: unknown, allowed: Set<string>) =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && allowed.has(item)) : [];
+    Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === 'string' && allowed.has(item)))] : [];
   return { preferences: list(preferences, PREFS), addons: list(addons, ADDONS) };
 }
 

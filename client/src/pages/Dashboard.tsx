@@ -68,6 +68,8 @@ function costLabel(usage: RunUsage | null) {
   return `${usage.serpCalls} SerpApi call${usage.serpCalls === 1 ? '' : 's'} · ${shown} tokens`;
 }
 
+const NO_ROUTE: RoutePoint[] = [];
+
 function toggle(list: string[], value: string) {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 }
@@ -88,6 +90,9 @@ export function Dashboard() {
   const [headline, setHeadline] = useState('');
   const [reason, setReason] = useState('');
   const [fingerprint, setFingerprint] = useState('');
+  // Bumped to cancel in-flight work: a newer search or place supersedes an older reply.
+  const searchRun = useRef(0);
+  const placeRun = useRef(0);
   const [chatOpen, setChatOpen] = useState(false);
   const [error, setError] = useState('');
   const [route, setRoute] = useState<{ path: RoutePoint[]; distance: string | null; duration: string | null } | null>(null);
@@ -161,6 +166,10 @@ export function Dashboard() {
   );
 
   function placeUser(lat: number, lng: number) {
+    searchRun.current += 1;
+    placeRun.current += 1;
+    setFingerprint('');
+    setChatOpen(false);
     saveSpot({ lat, lng, label: null });
     setUser({ lat, lng });
     setDropMode(false);
@@ -184,8 +193,8 @@ export function Dashboard() {
     navigator.geolocation.getCurrentPosition(
       (position) => placeUser(position.coords.latitude, position.coords.longitude),
       () => {
-        setDropMode(true);
-        setError('Location was blocked. Drop a pin on the map.');
+        setDropMode(!user);
+        setError(user ? "Couldn't update your location, so your current spot is kept." : 'Location was blocked. Drop a pin on the map.');
         setPhase('error');
       },
       { enableHighAccuracy: true, timeout: 8000 },
@@ -221,6 +230,9 @@ export function Dashboard() {
 
   async function search() {
     if (!user) return;
+    const run = ++searchRun.current;
+    placeRun.current += 1;
+    setFingerprint('');
     setPhase('searching');
     setSteps([]);
     setTrace([]);
@@ -242,12 +254,15 @@ export function Dashboard() {
         '/api/agent/search',
         { craving, lat: user.lat, lng: user.lng, radiusM: radius, preferences: prefs, addons, locationLabel: placeLabel || undefined },
         (event) => {
+          if (run !== searchRun.current) return;
           if (event.type === 'step') setSteps((current) => upsertStep(current, event));
           // Candidates drop onto the map as the agent finds them, before the ranking is final.
           if (event.type === 'places') setRanked(event.places);
         },
       );
+      if (run !== searchRun.current) return;
       setFingerprint(result.fingerprint);
+      setSelectedId(null);
       setHeadline(result.headline);
       setReason(result.reason);
       setRanked(result.places);
@@ -256,6 +271,7 @@ export function Dashboard() {
       setPhase('ranking');
       setResultsAt(Date.now());
     } catch (err) {
+      if (run !== searchRun.current) return;
       setError(err instanceof Error ? err.message : 'Search is unavailable');
       setPhase('error');
     }
@@ -277,6 +293,7 @@ export function Dashboard() {
   }
 
   function openPlace(id: string) {
+    const run = ++placeRun.current;
     const place = ranked.find((item) => item.id === id);
     setSelectedId(id);
     setPhase('place');
@@ -290,10 +307,12 @@ export function Dashboard() {
         endLng: place.lng,
       })
         .then((result) => {
+          if (run !== placeRun.current) return;
           setRoute(result);
           setRouteNote([result.duration, result.distance].filter(Boolean).join(' · ') || 'Route ready');
         })
         .catch(() => {
+          if (run !== placeRun.current) return;
           setRoute(null);
           setRouteNote('Route is unavailable');
         });
@@ -302,6 +321,7 @@ export function Dashboard() {
   }
 
   function closePlace() {
+    placeRun.current += 1;
     setPhase('ranking');
     setSelectedId(null);
     setRoute(null);
@@ -315,10 +335,10 @@ export function Dashboard() {
       <MapCanvas
         user={user}
         places={mapPlaces}
-        route={route?.path || []}
+        route={route?.path ?? NO_ROUTE}
         dropMode={dropMode}
         onDrop={placeUser}
-        onSelect={openPlace}
+        onSelect={(id) => (phase === 'ranking' || phase === 'place' ? openPlace(id) : undefined)}
       />
       <header
         className="absolute left-4 right-4 top-4 z-20 flex items-center gap-3 rounded-[20px] bg-white/[.92] py-2.5 pl-3.5 pr-2.5 backdrop-blur-[12px]"
@@ -458,7 +478,10 @@ export function Dashboard() {
           <div className="sheet max-h-[56vh] max-w-[600px] overflow-auto p-[22px]">
             <div className="flex items-center gap-3">
               <Mascot mood={chipCheer ? 'happy' : 'idle'} size={56} follow steam={false} className="flex-none" />
-              <p className="m-0 font-display text-2xl font-semibold">How do you like it?</p>
+              <p className="m-0 min-w-0 flex-1 font-display text-2xl font-semibold">How do you like it?</p>
+              <button type="button" onClick={() => setPhase('located')} className="flex-none cursor-pointer border-none bg-transparent p-0 text-sm font-bold text-tomato hover:underline">
+                Change craving
+              </button>
             </div>
             <ChipGroup title="Radius">
               {RADII.map((item, i) => (
@@ -509,10 +532,24 @@ export function Dashboard() {
                 <Mascot mood={celebrating ? 'found' : 'idle'} size={60} follow steam={false} className="flex-none" />
                 <ReviewReport headline={headline} places={ranked} />
               </div>
+              <div className="flex flex-none gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setChatOpen(false);
+                  setSelectedId(null);
+                  setPhase('located');
+                }}
+                className="btn-outline h-11 px-4"
+              >
+                <Search size={15} strokeWidth={2.5} />
+                New search
+              </button>
               <button className={`${chatOpen ? 'btn-primary shadow-none' : 'btn-outline'} h-11 flex-none px-4`} type="button" onClick={() => setChatOpen((open) => !open)}>
                 <MessageCircle size={15} strokeWidth={2.5} />
                 {chatOpen ? 'Chat open' : 'Ask about these'}
               </button>
+              </div>
             </div>
             <ResultCarousel places={ranked} onOpen={openPlace} />
             {trace.length ? (
@@ -550,7 +587,7 @@ export function Dashboard() {
               <button onClick={locate} className="btn-primary h-[46px] rounded-xl px-5 shadow-none">
                 Try locate
               </button>
-              <button onClick={() => setPhase(user ? 'located' : 'idle')} className="btn-outline h-[46px] px-5 text-[15px]">
+              <button onClick={() => { if (user) setDropMode(false); setPhase(user ? 'located' : 'idle'); }} className="btn-outline h-[46px] px-5 text-[15px]">
                 Back to map
               </button>
             </div>
@@ -961,6 +998,17 @@ function Mic({ onText, onListening }: { onText: (value: string) => void; onListe
     webkitSpeechRecognition?: new () => SpeechHandle;
   };
   const Ctor = win.SpeechRecognition || win.webkitSpeechRecognition;
+  const active = useRef<SpeechHandle | null>(null);
+  // Leaving the craving step stops listening, so a late transcript can't change a confirmed craving.
+  useEffect(
+    () => () => {
+      const rec = active.current;
+      if (!rec) return;
+      rec.onresult = null;
+      rec.abort?.();
+    },
+    [],
+  );
   if (!Ctor) return null;
   return (
     <button
@@ -970,6 +1018,7 @@ function Mic({ onText, onListening }: { onText: (value: string) => void; onListe
       style={{ boxShadow: '0 2px 8px rgba(28,26,31,.08)', animation: listening ? 'listen 1s ease-in-out infinite' : 'none' }}
       onClick={() => {
         const rec = new Ctor();
+        active.current = rec;
         rec.lang = 'en-IN';
         rec.onresult = (event) => onText(event.results[0][0].transcript);
         rec.onend = () => {
@@ -990,5 +1039,6 @@ type SpeechHandle = {
   lang: string;
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onend: (() => void) | null;
+  abort?: () => void;
   start: () => void;
 };

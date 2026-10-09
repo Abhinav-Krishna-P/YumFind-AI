@@ -95,15 +95,24 @@ export function ChatPanel({
     }
   }
 
+  // Only clear on screen what the server really deleted.
   async function clearChat() {
-    await apiCall('DELETE', `/api/agent/chat?fingerprint=${encodeURIComponent(fingerprint)}`).catch(() => undefined);
-    setMessages([]);
-    setError('');
+    try {
+      await apiCall('DELETE', `/api/agent/chat?fingerprint=${encodeURIComponent(fingerprint)}`);
+      setMessages([]);
+      setError('');
+    } catch {
+      setError("Couldn't clear the chat. Try again.");
+    }
   }
 
   async function forgetMemory() {
-    await apiCall('DELETE', '/api/agent/chat?memory=1').catch(() => undefined);
-    setMemory([]);
+    try {
+      await apiCall('DELETE', '/api/agent/chat?memory=1');
+      setMemory([]);
+    } catch {
+      setError("Couldn't forget your taste memory. Try again.");
+    }
   }
 
   function onSubmit(event: FormEvent) {

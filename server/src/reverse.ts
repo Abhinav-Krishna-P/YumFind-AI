@@ -32,11 +32,16 @@ function labelOf(address: NominatimAddress) {
 
 // Nominatim allows one request per second per app: queue upstream calls at least 1.1 s apart.
 let nextSlot = 0;
+const MAX_QUEUE_MS = 6000;
+
+/** Waits for a free slot; false when the queue is too deep to answer in time. */
 async function inTurn() {
   const now = Date.now();
   const wait = Math.max(0, nextSlot - now);
+  if (wait > MAX_QUEUE_MS) return false;
   nextSlot = Math.max(now, nextSlot) + 1100;
   if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+  return true;
 }
 
 /** Human-readable "Area, City" for a coordinate, via OpenStreetMap Nominatim. */
@@ -54,7 +59,7 @@ export async function placeName(lat: number, lng: number, signal: AbortSignal) {
     'accept-language': 'en',
   }).toString();
 
-  await inTurn();
+  if (!(await inTurn())) return null;
   const res = await fetch(url, { signal, headers: { 'User-Agent': 'YumFindAI/1.0 (local dev)' } });
   if (!res.ok) return null;
   const json = (await res.json()) as { address?: NominatimAddress };

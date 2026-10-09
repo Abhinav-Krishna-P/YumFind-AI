@@ -1,24 +1,29 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
 import { stream } from 'hono/streaming';
 import { runFollowUpAgent, runSearchAgent, type AgentEvent } from './agent.js';
 import { clearChat, forget, loadChat, loadMemory } from './chat.js';
+import { env } from './env.js';
+import { validCoord } from './geo.js';
+import { placeId, rateLimit, readJson, searchKey } from './guard.js';
 import { kvBackend } from './kv.js';
 import { identifyDish } from './lens.js';
 import { placeMenu } from './menu.js';
-import { env } from './env.js';
-import { validCoord } from './geo.js';
-import { askFollowUp, cleanLists, findFood, findNearby } from './pipeline.js';
-import { assertHospitality } from './topic.js';
+import { cleanLists } from './pipeline.js';
 import { placeName } from './reverse.js';
 import { drivingRoute } from './serp.js';
 import { authClient, placeDataId, recordVisit } from './store.js';
+import { assertHospitality } from './topic.js';
 import { HttpError, type Actor } from './types.js';
 
 const RADII = new Set([1000, 2000, 5000, 10000]);
+const tooLarge = (c: Parameters<Parameters<typeof bodyLimit>[0]['onError'] & {}>[0]) => c.json({ error: 'That request is too large' }, 413);
 
 const app = new Hono();
+app.use('*', secureHeaders());
 app.use(
   '*',
   cors({
@@ -26,6 +31,12 @@ app.use(
     allowHeaders: ['Authorization', 'Content-Type'],
   }),
 );
+// Photos (Snap a dish) are the only large bodies; everything else is small JSON.
+app.use('/api/dish/identify', bodyLimit({ maxSize: 6 * 1024 * 1024, onError: tooLarge }));
+app.use('/api/*', async (c, next) => {
+  if (c.req.path === '/api/dish/identify') return next();
+  return bodyLimit({ maxSize: 100 * 1024, onError: tooLarge })(c, next);
+});
 
 app.onError((error, c) => {
   if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 400);
@@ -39,7 +50,7 @@ app.get('/api/health', async (c) =>
     serp: Boolean(env.serp),
     gemini: Boolean(env.gemini),
     jev: false,
-    supabase: Boolean(env.supabaseUrl && env.supabaseKey),
+    supabase: Boolean(env.supabaseUrl && env.supabaseKey && env.serviceRole),
     cache: await kvBackend(),
   }),
 );
@@ -55,48 +66,12 @@ async function actor(c: { req: { header: (name: string) => string | undefined } 
   return { userId: data.user.id, jwt };
 }
 
-app.post('/api/nearby', async (c) => {
-  const user = await actor(c);
-  const body = await c.req.json<{ lat?: number; lng?: number }>();
-  const lat = Number(body.lat);
-  const lng = Number(body.lng);
-  if (!validCoord(lat, lng)) throw new HttpError(400, 'Need a location');
-  return c.json(await findNearby(user, lat, lng));
-});
-
-app.post('/api/topic', async (c) => {
+app.post('/api/topic', rateLimit('topic', 60), async (c) => {
   await actor(c);
-  const body = await c.req.json<{ text?: string; mode?: string }>();
+  const body = await readJson<{ text?: string; mode?: string }>(c);
   const mode = body.mode === 'followup' ? 'followup' : 'search';
-  await assertHospitality(String(body.text || ''), mode);
+  await assertHospitality(String(body.text || '').slice(0, 240), mode);
   return c.json({ ok: true });
-});
-
-app.post('/api/search', async (c) => {
-  const user = await actor(c);
-  const body = await c.req.json<{
-    craving?: string;
-    lat?: number;
-    lng?: number;
-    radiusM?: number;
-    preferences?: unknown;
-    addons?: unknown;
-  }>();
-  const lat = Number(body.lat);
-  const lng = Number(body.lng);
-  const radiusM = Number(body.radiusM);
-  if (!validCoord(lat, lng)) throw new HttpError(400, 'Need a location');
-  if (!RADII.has(radiusM)) throw new HttpError(400, 'Pick a radius');
-  const lists = cleanLists(body.preferences, body.addons);
-  return c.json(
-    await findFood(user, {
-      craving: String(body.craving || '').slice(0, 200),
-      lat,
-      lng,
-      radiusM,
-      ...lists,
-    }),
-  );
 });
 
 // Agent routes stream newline-delimited JSON events while YumFindAI works, ending with {type:"done"}.
@@ -122,9 +97,10 @@ function streamAgent(c: Parameters<typeof stream>[0], run: (emit: (event: AgentE
   });
 }
 
-app.post('/api/agent/search', async (c) => {
+// Each live search can spend up to ~17 SerpApi calls, so this is the tightest limit.
+app.post('/api/agent/search', rateLimit('search', 6), async (c) => {
   const user = await actor(c);
-  const body = await c.req.json<{
+  const body = await readJson<{
     craving?: string;
     lat?: number;
     lng?: number;
@@ -132,7 +108,7 @@ app.post('/api/agent/search', async (c) => {
     preferences?: unknown;
     addons?: unknown;
     locationLabel?: string;
-  }>();
+  }>(c);
   const lat = Number(body.lat);
   const lng = Number(body.lng);
   const radiusM = Number(body.radiusM);
@@ -150,61 +126,53 @@ app.post('/api/agent/search', async (c) => {
   return streamAgent(c, (emit) => runSearchAgent(user, input, emit));
 });
 
-app.post('/api/agent/followup', async (c) => {
+app.post('/api/agent/followup', rateLimit('chat', 20), async (c) => {
   const user = await actor(c);
-  const body = await c.req.json<{ fingerprint?: string; question?: string; lat?: number; lng?: number }>();
+  const body = await readJson<{ fingerprint?: string; question?: string; lat?: number; lng?: number }>(c);
   const question = String(body.question || '').trim().slice(0, 240);
-  if (!body.fingerprint || !question) throw new HttpError(400, 'Ask about the places on the map');
+  if (!question) throw new HttpError(400, 'Ask about the places on the map');
+  const fingerprint = searchKey(body.fingerprint);
   const lat = Number(body.lat);
   const lng = Number(body.lng);
-  const input = { fingerprint: body.fingerprint, question, ...(validCoord(lat, lng) ? { lat, lng } : {}) };
+  const input = { fingerprint, question, ...(validCoord(lat, lng) ? { lat, lng } : {}) };
   return streamAgent(c, (emit) => runFollowUpAgent(user, input, emit));
 });
 
 // Menu & prices: the place's Google Maps menu photos, read into dishes and prices (cached 14 days).
-app.post('/api/place/menu', async (c) => {
+app.post('/api/place/menu', rateLimit('menu', 10), async (c) => {
   const user = await actor(c);
-  const body = await c.req.json<{ placeId?: string }>();
-  const dataId = body.placeId ? await placeDataId(user, body.placeId) : null;
+  const body = await readJson<{ placeId?: string }>(c);
+  const dataId = await placeDataId(user, placeId(body.placeId));
   if (!dataId) throw new HttpError(404, 'That place is not saved yet');
   return c.json(await placeMenu(dataId));
 });
 
 // Snap a dish: a food photo (data URL) becomes a dish name via Google Lens.
-app.post('/api/dish/identify', async (c) => {
+app.post('/api/dish/identify', rateLimit('snap', 6), async (c) => {
   await actor(c);
-  const body = await c.req.json<{ image?: string }>();
+  const body = await readJson<{ image?: string }>(c);
   return c.json(await identifyDish(String(body.image || '')));
 });
 
 // Chat history and taste memory for one result set ("Ask about these"), stored in Redis.
-app.get('/api/agent/chat', async (c) => {
+app.get('/api/agent/chat', rateLimit('history', 60), async (c) => {
   const user = await actor(c);
-  const fingerprint = c.req.query('fingerprint') || '';
-  if (!fingerprint) throw new HttpError(400, 'Missing search');
+  const fingerprint = searchKey(c.req.query('fingerprint'));
   const [messages, memory, store] = await Promise.all([loadChat(user.userId, fingerprint), loadMemory(user.userId), kvBackend()]);
   return c.json({ messages, memory, store });
 });
 
-app.delete('/api/agent/chat', async (c) => {
+app.delete('/api/agent/chat', rateLimit('history', 60), async (c) => {
   const user = await actor(c);
-  const fingerprint = c.req.query('fingerprint') || '';
-  if (fingerprint) await clearChat(user.userId, fingerprint);
+  const fingerprint = c.req.query('fingerprint');
+  if (fingerprint) await clearChat(user.userId, searchKey(fingerprint));
   if (c.req.query('memory') === '1') await forget(user.userId);
   return c.json({ ok: true });
 });
 
-app.post('/api/followup', async (c) => {
-  const user = await actor(c);
-  const body = await c.req.json<{ fingerprint?: string; question?: string }>();
-  const question = String(body.question || '').trim().slice(0, 240);
-  if (!body.fingerprint || !question) throw new HttpError(400, 'Ask about the places on the map');
-  return c.json(await askFollowUp(user, body.fingerprint, question));
-});
-
-app.post('/api/directions', async (c) => {
+app.post('/api/directions', rateLimit('directions', 30), async (c) => {
   await actor(c);
-  const body = await c.req.json<{ startLat?: number; startLng?: number; endLat?: number; endLng?: number }>();
+  const body = await readJson<{ startLat?: number; startLng?: number; endLat?: number; endLng?: number }>(c);
   const startLat = Number(body.startLat);
   const startLng = Number(body.startLng);
   const endLat = Number(body.endLat);
@@ -219,9 +187,9 @@ app.post('/api/directions', async (c) => {
   );
 });
 
-// Public: Home asks "where am I?" before anyone signs in. Cached per ~150 m and throttled in reverse.ts.
-app.post('/api/where', async (c) => {
-  const body = await c.req.json<{ lat?: number; lng?: number }>();
+// Public: Home asks "where am I?" before anyone signs in. Cached per ~150 m, throttled in reverse.ts.
+app.post('/api/where', rateLimit('where', 20, 'ip'), async (c) => {
+  const body = await readJson<{ lat?: number; lng?: number }>(c);
   const lat = Number(body.lat);
   const lng = Number(body.lng);
   if (!validCoord(lat, lng)) throw new HttpError(400, 'Need a location');
@@ -229,18 +197,18 @@ app.post('/api/where', async (c) => {
   return c.json({ label });
 });
 
-app.post('/api/visits', async (c) => {
+app.post('/api/visits', rateLimit('visits', 60), async (c) => {
   const user = await actor(c);
-  const body = await c.req.json<{ placeId?: string }>();
-  if (!body.placeId) throw new HttpError(400, 'Missing place');
-  const ok = await recordVisit(user, body.placeId);
+  const body = await readJson<{ placeId?: string }>(c);
+  const ok = await recordVisit(user, placeId(body.placeId));
   if (!ok) throw new HttpError(404, 'That place is not saved yet');
   return c.json({ ok: true });
 });
 
-serve({ fetch: app.fetch, port: env.port }, () => {
+// Local by default: the API is only reachable from this machine (Vite proxies to it).
+serve({ fetch: app.fetch, port: env.port, hostname: env.host }, () => {
   console.log(
-    `YumFindAI API on :${env.port} serp=${flag(env.serp)} gemini=${flag(env.gemini)} jev=paused supabase=${flag(env.supabaseUrl)}`,
+    `YumFindAI API on ${env.host}:${env.port} serp=${flag(env.serp)} gemini=${flag(env.gemini)} supabase=${flag(env.supabaseUrl)} service-role=${flag(env.serviceRole)}`,
   );
 });
 

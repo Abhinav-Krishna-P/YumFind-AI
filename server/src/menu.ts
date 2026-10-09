@@ -81,7 +81,7 @@ export async function placeMenu(dataId: string): Promise<Menu & { cached: boolea
         console.error('[menu]', error instanceof Error ? error.message : error);
         return null;
       });
-      return { index, items, ok: true };
+      return { index, items, ok: items !== null };
     }),
   );
   const seen = new Set<string>();

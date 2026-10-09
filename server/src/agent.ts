@@ -1,5 +1,5 @@
 import { judgeTwins, toolTurn, type Content, type FunctionDeclaration, type Part, type Usage } from './gemini.js';
-import { dishQuery, fingerprint, haversine } from './geo.js';
+import { dishQuery, fingerprint, geohash, haversine } from './geo.js';
 import { ANSWER_TTL, answerKey, appendChat, chatContext, learn, loadChat, loadMemory, messageId, type ChatMessage } from './chat.js';
 import { kvGet, kvSet } from './kv.js';
 import { embedLater, present } from './pipeline.js';
@@ -656,7 +656,9 @@ export async function runSearchAgent(
   const dish = dishQuery(input.craving);
   if (!dish) throw new HttpError(400, 'Say what you want to eat');
   const wantsBest = /\bbest\b|highly rated/i.test(input.craving);
-  const key = fingerprint({ ...input, wantsBest });
+  const memory = await loadMemory(actor.userId);
+  // Results are shaped by the user's remembered taste (prompt and Taste Twins), so the cache key includes it.
+  const key = `${fingerprint({ ...input, wantsBest })}${memory.length ? `|m:${memory.join(',')}` : ''}`;
 
   const cached = await readSearchStore(actor, key);
   if (cached) {
@@ -668,7 +670,6 @@ export async function runSearchAgent(
     return result;
   }
 
-  const memory = await loadMemory(actor.userId);
   void learn(actor.userId, [input.craving, ...input.preferences, ...input.addons].join(' ')).catch(() => undefined);
   const state = newState(actor, { lat: input.lat, lng: input.lng }, input.radiusM, emit, 12);
   state.dish = dish;
@@ -746,8 +747,11 @@ export async function runSearchAgent(
   const headline = String(finish.headline || (saved.length ? 'Review report' : 'No open match')).trim();
   const reason = String(finish.reason || (saved.length ? 'Built from reviews in the last 3 months.' : 'Try a wider radius.')).trim();
   const snapshot = { fingerprint: key, headline, reason, places: saved, expiresAt: Date.now() + 6 * 60 * 60 * 1000, trace: state.trace };
-  rememberSearch(snapshot);
-  await saveSearchSnapshot(actor, snapshot);
+  // An empty result (no matches, or SerpApi failing) is not cached, so the next try searches again.
+  if (saved.length) {
+    rememberSearch(snapshot);
+    await saveSearchSnapshot(actor, snapshot);
+  }
   await recordSearch(actor, { query: input.craving, lat: input.lat, lng: input.lng, radiusM: input.radiusM, budget: 'any', preferences: input.preferences, addons: input.addons, placeIds: saved.map((place) => place.id), cacheHit: false });
   void Promise.race([
     embedLater(actor, saved).catch((error) => console.error('[embed]', error instanceof Error ? error.message : error)),
@@ -784,7 +788,9 @@ export async function runFollowUpAgent(
 
   const [messages, memory] = await Promise.all([loadChat(actor.userId, input.fingerprint), loadMemory(actor.userId)]);
   const asked: ChatMessage = { id: messageId(), role: 'user', text: input.question, at: Date.now() };
-  const key = answerKey(input.fingerprint, input.question, messages, memory);
+  // Drive times depend on where the asker is, so answers are shared only within ~5 km.
+  const near = input.lat != null && input.lng != null ? geohash(input.lat, input.lng, 5) : '';
+  const key = answerKey(input.fingerprint, input.question, messages, memory, near);
   const placeName = (id: string | null) => snapshot.places.find((place) => place.id === id)?.name ?? null;
 
   const known = await kvGet<Omit<FollowUpResult, 'usage'>>(key);

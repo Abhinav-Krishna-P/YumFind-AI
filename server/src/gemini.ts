@@ -155,7 +155,7 @@ async function generate(system: string, user: string, timeoutMs = 20000) {
     });
   const thinking = Boolean(env.geminiThinking) && thinkingAccepted;
   let res = await send(thinking);
-  if (!res.ok && thinking && res.status === 400) {
+  if (!res.ok && thinking && res.status === 400 && /thinking/i.test(await res.clone().text())) {
     thinkingAccepted = false;
     res = await send(false);
   }
@@ -177,14 +177,12 @@ Return JSON only: {"allowed":true} or {"allowed":false}.`;
 
 export async function topicAllowed(text: string, mode: 'search' | 'followup') {
   if (!env.gemini) return false;
+  // No answer is not a "no": throw so the caller neither rejects nor caches it.
   const raw = await generate(GATE, `mode: ${mode}\nmessage: ${text.slice(0, 240)}`, 15000);
-  if (!raw) return false;
-  try {
-    const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '')) as { allowed?: boolean };
-    return parsed.allowed === true;
-  } catch {
-    return false;
-  }
+  if (!raw) throw new Error('topic gate unavailable');
+  const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '')) as { allowed?: boolean };
+  if (typeof parsed.allowed !== 'boolean') throw new Error('topic gate gave no verdict');
+  return parsed.allowed;
 }
 
 export async function embedTexts(texts: string[]) {
@@ -369,7 +367,7 @@ export async function readMenuPhoto(image: { mime: string; data: string }, photo
     });
   const thinking = Boolean(env.geminiThinking) && thinkingAccepted;
   let res = await send(thinking);
-  if (!res.ok && thinking && res.status === 400) {
+  if (!res.ok && thinking && res.status === 400 && /thinking/i.test(await res.clone().text())) {
     thinkingAccepted = false;
     res = await send(false);
   }

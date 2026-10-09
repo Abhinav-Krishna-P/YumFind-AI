@@ -196,7 +196,7 @@ It also blinks, follows the pointer, cheers up on hover and hops when tapped. Al
 
 **You need:** Node 20+, a [Supabase](https://supabase.com) project, a [SerpApi](https://serpapi.com) key and a [Gemini API](https://aistudio.google.com) key. Redis is optional but recommended (`docker run -p 6379:6379 redis`, or any local Redis).
 
-1. **Database.** In the Supabase SQL editor, run [`supabase/migrations/20261006103000_init.sql`](supabase/migrations/20261006103000_init.sql). It creates the tables, RLS policies, the `vector` extension and the signup trigger.
+1. **Database.** In the Supabase SQL editor, run the two files in [`supabase/migrations`](supabase/migrations) in order: [`20261006103000_init.sql`](supabase/migrations/20261006103000_init.sql) creates the tables, the `vector` extension and the signup trigger; [`20261009120000_lock_shared_tables.sql`](supabase/migrations/20261009120000_lock_shared_tables.sql) makes the shared place, review and cache tables read-only for users (only the server writes them).
 
 2. **Environment.** Copy `.env.example` to `.env` in the repo root and fill it in:
 
@@ -209,6 +209,7 @@ It also blinks, follows the pointer, cheers up on hover and hops when tapped. Al
    | `GEMINI_MODEL`, `GEMINI_EMBED_MODEL` | server | defaults `gemini-3.8-flash`, `gemini-embedding-001` |
    | `GEMINI_THINKING` | server | `low` (default); leave empty for the model default |
    | `REDIS_URL` | server | default `redis://127.0.0.1:6379` |
+   | `API_HOST`, `PORT` | server | default `127.0.0.1:8787` (only reachable from this machine) |
    | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | browser | the public Supabase URL and key |
    | `TYPESAFE_AI_API_KEY`, `JEV_MODEL` | optional | an earlier ranking model, paused ([`server/src/jev.ts`](server/src/jev.ts)) |
 
@@ -245,9 +246,15 @@ It also blinks, follows the pointer, cheers up on hover and hops when tapped. Al
 | `POST /api/dish/identify` | user | Snap a dish: a photo (data URL) in, `{ dish, confidence }` out, via Google Lens. |
 | `POST /api/where` | public | Place name for a coordinate, so Home can say where you are before login. |
 | `GET /api/health` | public | Which services are configured, and whether the cache is on Redis. |
-| `POST /api/nearby`, `/api/search`, `/api/followup` | user | The earlier fixed pipeline, kept as a fallback; the app no longer calls them. |
 
 "User" routes need a Supabase access token (`Authorization: Bearer …`); the server derives the user from the token, never from the request body.
+
+### Security
+
+- API keys (SerpApi, Gemini, Supabase service role) live only on the server; the browser only has the public Supabase key.
+- Row-level security on every table: users read and write only their own profile, searches and visits; shared places and reviews are read-only to them, and embeddings and cached searches aren't exposed at all.
+- Per-user rate limits on every route (e.g. 6 searches and 20 chat messages a minute; 20 place-name lookups a minute per address), 100 KB request bodies (6 MB for photos), validated ids and coordinates, and standard security headers.
+- The API listens on `127.0.0.1` by default; uploaded dish photos are deleted right after the Lens lookup.
 
 ## Project layout
 
@@ -298,6 +305,7 @@ Before the final push, these were verified end to end against the running app wi
 - Snap a dish: a masala dosa photo was named *"masala dosa"* (95%) and the temporary photo was deleted afterwards
 - visits are recorded and profile counts are readable under RLS
 - with SerpApi out of credits, a new search ends cleanly with a clear message instead of an error
+- security pass: `npm audit` clean on client and server; malformed JSON → 400, oversized bodies → 413, removed routes → 404, rate limits → 429, security headers present; client and server code reviewed for auth, injection, cache and race-condition bugs, and the findings fixed
 
 Live agent runs were measured on earlier test searches (see [Keeping tokens and credits down](#keeping-tokens-and-credits-down)).
 

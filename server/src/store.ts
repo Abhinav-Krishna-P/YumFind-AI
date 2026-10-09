@@ -1,9 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { env } from './env.js';
+import { TtlCache } from './memory.js';
 import type { Actor, Place, Review, Snapshot, TraceStep } from './types.js';
 
 const nearbyMem = new Map<string, { expires: number; places: Place[] }>();
-const searchMem = new Map<string, Snapshot>();
+const searchMem = new TtlCache<Snapshot>(6 * 60 * 60 * 1000, 300);
 
 let admin: SupabaseClient | null = null;
 
@@ -110,6 +111,8 @@ export async function savePlaces(actor: Actor, places: Place[]) {
       .select('id')
       .single();
     log('places', error);
+    // A place that failed to save has no row id; leave it out rather than break the whole result.
+    if (db === admin && !data?.id) continue;
     const id = data?.id ? String(data.id) : place.id;
     const next = { ...place, id };
     if (data?.id && place.reviews.length) {

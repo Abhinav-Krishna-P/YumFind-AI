@@ -27,19 +27,26 @@ function redis() {
       warnOnce('REDIS_URL is empty');
       return null;
     }
+    const host = new URL(env.redisUrl).host;
+    // Keeps retrying in the background (capped backoff), so Redis coming back later is picked up.
     const client = createClient({
       url: env.redisUrl,
-      socket: { connectTimeout: 1500, reconnectStrategy: (retries) => (retries > 5 ? false : Math.min(retries * 200, 1000)) },
+      socket: { connectTimeout: 1500, reconnectStrategy: (retries) => Math.min(retries * 500, 10_000) },
     });
     client.on('error', (error: Error) => warnOnce(`Redis error: ${error.message}`));
-    try {
-      await client.connect();
-      console.log(`[kv] Redis connected (${new URL(env.redisUrl).host})`);
-      return client;
-    } catch (error) {
-      warnOnce(`Redis unreachable at ${new URL(env.redisUrl).host} (${error instanceof Error ? error.message : error})`);
-      return null;
-    }
+    client.on('ready', () => console.log(`[kv] Redis connected (${host})`));
+    void client.connect().catch(() => undefined);
+    // Never make a request wait on Redis for more than ~2 s at startup.
+    await new Promise<void>((resolve) => {
+      if (client.isReady) return resolve();
+      const timer = setTimeout(resolve, 2000);
+      client.once('ready', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    if (!client.isReady) warnOnce(`Redis unreachable at ${host}; will keep retrying`);
+    return client;
   })();
   return connecting;
 }
