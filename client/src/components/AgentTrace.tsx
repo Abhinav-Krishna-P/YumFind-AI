@@ -1,12 +1,13 @@
 import type { MascotMood } from '@/components/mascot/Mascot';
 import type { AgentStep } from '@/lib/api';
-import { Check, Database, Globe, MapPin, MessageSquareText, Navigation, Sparkles } from 'lucide-react';
+import { Check, Database, Globe, Heart, MapPin, MessageSquareText, Navigation, Sparkles } from 'lucide-react';
 
 const ICONS: Record<string, typeof MapPin> = {
   search_places: MapPin,
   read_reviews: MessageSquareText,
   web_search: Globe,
   get_directions: Navigation,
+  taste_twins: Heart,
   cache: Database,
 };
 
@@ -15,6 +16,7 @@ const ENGINES: Record<string, string> = {
   read_reviews: 'google_maps_reviews',
   web_search: 'google',
   get_directions: 'google_maps_directions',
+  taste_twins: 'google_maps_contributor_reviews',
   cache: 'cache',
 };
 
@@ -24,6 +26,7 @@ const TOOL_MOOD: Record<string, MascotMood> = {
   read_reviews: 'reading',
   web_search: 'thinking',
   get_directions: 'thinking',
+  taste_twins: 'curious',
   cache: 'happy',
 };
 

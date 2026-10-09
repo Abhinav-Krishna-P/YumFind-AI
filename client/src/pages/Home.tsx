@@ -1,13 +1,32 @@
 import { CATEGORIES, FoodRing, Logo, Photo, foodImg, useTitle } from '@/components/brand';
 import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
+import { SnapButton, type SnapState } from '@/components/SnapButton';
 import { useSession } from '@/lib/session';
 import { currentPosition, placeNameFor, readSpot, saveSpot, type Spot } from '@/lib/spot';
-import { ArrowRight, Check, LocateFixed, Search, Sparkles } from 'lucide-react';
+import { ArrowRight, BadgeCheck, Camera, Check, Heart, LocateFixed, MessageSquareText, Search, Sparkles } from 'lucide-react';
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-const QUICK_PICKS = ['Biryani', 'Filter coffee', 'Pure veg', 'Rooftop cafe'];
-const HEADLINE = ['Find', 'a', 'place', 'to'];
+const QUICK_PICKS = ['Mild chicken biryani', 'Spicy beef fry', 'Pure veg thali', 'Quiet cafe'];
+const HEADLINE = ['Food', 'that', 'fits'];
+
+const WHY = [
+  {
+    icon: Heart,
+    title: 'Learns your taste',
+    text: 'Mild or spicy, veg, family dinners, quick bites. YumFindAI remembers how you like it, so every search gets more personal.',
+  },
+  {
+    icon: MessageSquareText,
+    title: "Reads this month's reviews",
+    text: 'Not a star average: what people said recently about the exact dish you want, at each place.',
+  },
+  {
+    icon: BadgeCheck,
+    title: 'Explains every match',
+    text: "Each pick says why it suits you, which dishes reviewers love, and whether it's open when you get there.",
+  },
+];
 
 const floatCircle: CSSProperties = {
   border: '6px solid #fff',
@@ -38,6 +57,7 @@ export function Home() {
   const [greeting, setGreeting] = useState(true);
   const [goHover, setGoHover] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [snap, setSnap] = useState<SnapState>({ status: 'idle' });
   const input = useInputGaze();
   const justFound = foundAt > 0 && Date.now() - foundAt < 2400;
 
@@ -89,6 +109,15 @@ export function Home() {
     void locate(label);
   }
 
+  /** Snap a dish: once Lens names it, show the name for a beat, then search for it. */
+  function onSnap(state: SnapState) {
+    setSnap(state);
+    if (state.status !== 'done' || !state.dish) return;
+    const dish = state.dish;
+    setCraving(dish);
+    window.setTimeout(() => pick(dish), 1100);
+  }
+
   function onSearch(event: FormEvent) {
     event.preventDefault();
     pick(craving);
@@ -97,21 +126,25 @@ export function Home() {
   const typing = Boolean(input.focused);
   const where = town(spot?.label ?? null);
   let mood: MascotMood = 'idle';
-  if (leaving || justFound) mood = 'found';
-  else if (locating) mood = 'searching';
+  if (leaving || justFound || snap.status === 'done') mood = 'found';
+  else if (locating || snap.status === 'working') mood = 'searching';
+  else if (snap.status === 'error') mood = 'sad';
   else if (locError) mood = 'sad';
   else if (goHover) mood = 'happy';
   else if (typing) mood = 'curious';
   else if (greeting && !spot) mood = 'wave';
 
-  let bubble = { kind: 'ask', text: `What are you craving${where ? ` in ${where}` : ''}?` };
-  if (leaving) bubble = { kind: 'go', text: 'On it! Reading the reviews.' };
+  let bubble = { kind: 'ask', text: `What are you in the mood for${where ? ` in ${where}` : ''}? I'll match it to your taste.` };
+  if (snap.status === 'done' && snap.dish) bubble = { kind: 'snapped', text: `Looks like ${snap.dish}! Finding who makes it your way.` };
+  else if (snap.status === 'working') bubble = { kind: 'snapping', text: 'Looking at your photo...' };
+  else if (snap.status === 'error') bubble = { kind: 'snap-error', text: snap.message || "I couldn't tell what dish that is." };
+  else if (leaving) bubble = { kind: 'go', text: 'On it! Reading the reviews.' };
   else if (locating) bubble = { kind: 'locating', text: 'Looking around for you...' };
   else if (locError) bubble = { kind: 'error', text: "I can't see where you are. Drop a pin on the map?" };
   else if (!spot) bubble = { kind: 'hello', text: "Hi, I'm YumFindAI. First, where are you?" };
-  else if (justFound) bubble = { kind: 'found', text: `Found you${where ? ` in ${where}` : ''}! What are you craving?` };
+  else if (justFound) bubble = { kind: 'found', text: `Found you${where ? ` in ${where}` : ''}! How do you like your food?` };
   else if (goHover) bubble = { kind: 'hover', text: "Let's eat!" };
-  else if (craving.trim()) bubble = { kind: 'craving', text: `${short(craving)}? Good call. I'll check who makes it best.` };
+  else if (craving.trim()) bubble = { kind: 'craving', text: `${short(craving)}? I'll find who makes it your way.` };
   else if (typing) bubble = { kind: 'typing', text: 'Type a dish. I read the newest reviews.' };
 
   return (
@@ -154,7 +187,7 @@ export function Home() {
             <span className="grid h-[22px] w-[22px] place-items-center rounded-full text-white" style={{ background: 'var(--grad)' }}>
               <Sparkles size={12} strokeWidth={3} />
             </span>
-            An agent that reads the reviews for you
+            Not just nearby. Matched to your taste.
           </span>
           <h1 className="m-0 font-display text-[clamp(46px,6.4vw,84px)] font-bold leading-none tracking-[-.025em] [text-wrap:balance]">
             {HEADLINE.map((word, i) => (
@@ -163,7 +196,7 @@ export function Home() {
               </span>
             ))}
             <span className="relative inline-block" style={{ animation: 'blurIn .8s cubic-bezier(.2,.7,.2,1) .33s backwards' }}>
-              eat
+              your
               <svg viewBox="0 0 120 20" preserveAspectRatio="none" className="absolute bottom-[-8px] left-[-4%] h-4 w-[108%] overflow-visible">
                 <path
                   d="M3 13 C 30 4, 70 4, 117 10"
@@ -179,11 +212,11 @@ export function Home() {
               </svg>
             </span>{' '}
             <span className="text-grad inline-block" style={{ animation: 'blurIn .8s cubic-bezier(.2,.7,.2,1) .4s backwards' }}>
-              nearby.
+              taste.
             </span>
           </h1>
           <p className="m-0 max-w-[480px] text-lg leading-relaxed text-muted [text-wrap:pretty]" style={{ animation: 'fadeUp .7s ease .5s backwards' }}>
-            Tell YumFindAI where you are and what you're craving. It searches Google Maps, reads the newest reviews, cross-checks the web, and ranks only what the evidence supports.
+            Google Maps lists everything around you. YumFindAI finds the few that fit you: it reads this month's reviews for the dish you want, remembers how you like it, and explains why each pick suits you.
           </p>
           {spot ? (
             <div className="flex max-w-[560px] flex-col gap-3" style={{ animation: 'fadeUp .5s ease backwards' }}>
@@ -212,12 +245,26 @@ export function Home() {
                 <input
                   value={craving}
                   onChange={(event) => setCraving(event.target.value)}
-                  placeholder="Biryani, cafe, or hotel"
-                  aria-label="What are you craving?"
+                  placeholder="Mild chicken biryani, spicy beef fry..."
+                  aria-label="What are you craving, and how do you like it?"
                   autoFocus={justFound}
                   className="min-w-0 flex-1 border-none bg-transparent px-1 py-3 text-base font-medium text-ink outline-none"
                   {...input.bind}
                 />
+                {session ? (
+                  <SnapButton onChange={onSnap} className="h-[46px] w-[46px]" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/login', { state: { next: '/' } })}
+                    aria-label="Log in to search by photo"
+                    title="Log in to search by photo"
+                    className="grid h-[46px] w-[46px] flex-none cursor-pointer place-items-center rounded-xl border-none bg-white text-tomato hover:bg-blush"
+                    style={{ boxShadow: '0 2px 8px rgba(28,26,31,.08)' }}
+                  >
+                    <Camera size={19} strokeWidth={2.5} />
+                  </button>
+                )}
                 <button
                   type="submit"
                   className="btn-primary flex-none px-[22px] py-3.5"
@@ -228,6 +275,15 @@ export function Home() {
                   <ArrowRight size={16} strokeWidth={2.75} />
                 </button>
               </form>
+              {snap.status === 'error' ? (
+                <p className="m-0 text-sm font-semibold text-[#d42a35]" style={{ animation: 'fadeUp .3s ease backwards' }}>
+                  {snap.message}
+                </p>
+              ) : (
+                <p className="m-0 flex items-center gap-1.5 text-[13px] font-medium text-faint">
+                  <Camera size={14} strokeWidth={2.5} /> Saw something tasty? Snap or upload a photo and YumFindAI finds who makes it near you.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {QUICK_PICKS.map((label) => (
                   <button key={label} className="pill-link" onClick={() => pick(label)}>
@@ -244,7 +300,27 @@ export function Home() {
         <HeroArt mood={mood} lookAt={input.point} bubble={bubble} />
       </section>
 
-      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-20 pt-6">
+      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-4 pt-6">
+        <h2 className="m-0 font-display text-[28px] font-semibold tracking-[-.01em]">Not another map. A match for your taste.</h2>
+        <p className="m-0 mt-1 max-w-[640px] text-[15px] text-muted">A map shows what is near. YumFindAI works out what is right for you.</p>
+        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4">
+          {WHY.map(({ icon: Icon, title, text }, i) => (
+            <div
+              key={title}
+              className="rounded-[22px] bg-white p-5"
+              style={{ boxShadow: '0 0 0 1px #f1edf2', animation: `fadeUp .5s ease ${i * 80}ms backwards` }}
+            >
+              <span className="grid h-10 w-10 place-items-center rounded-xl text-white" style={{ background: 'var(--grad)' }}>
+                <Icon size={19} strokeWidth={2.5} />
+              </span>
+              <p className="m-0 mt-3 font-display text-lg font-semibold">{title}</p>
+              <p className="m-0 mt-1 text-sm leading-relaxed text-muted">{text}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-20 pt-8">
         <h2 className="m-0 mb-[18px] font-display text-[28px] font-semibold tracking-[-.01em]">What are you craving?</h2>
         <div className="no-scrollbar flex gap-[clamp(14px,2.4vw,30px)] overflow-x-auto px-1 pb-3.5 pt-1.5">
           {CATEGORIES.map((category, i) => (
@@ -350,10 +426,10 @@ function HeroArt({
       >
         <Photo src={foodImg('1563379091339-03b21ab4a4f8')} className="h-14 w-14 rounded-[14px]" />
         <div>
-          <div className="font-display text-[17px] font-semibold">Biryani tonight?</div>
+          <div className="font-display text-[17px] font-semibold">Mild biryani, family-friendly</div>
           <div className="flex items-center gap-1.5 text-xs font-semibold text-muted">
             <span className="rating-badge px-[7px] py-0.5">★ 4.5</span>
-            Ranked from recent reviews
+            Matches your taste
           </div>
         </div>
       </div>

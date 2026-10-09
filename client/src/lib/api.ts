@@ -9,6 +9,8 @@ export type Points = {
   source: 'jev' | 'gemini' | 'fallback';
 };
 
+export type TasteTwin = { name: string; photo: string | null; localGuide: boolean; match: number; why: string; rating: number | null; said: string };
+
 export type Place = {
   id: string;
   name: string;
@@ -26,6 +28,8 @@ export type Place = {
   hours?: Record<string, string> | null;
   /** Dishes recent reviews praise here. */
   dishes?: string[];
+  /** Reviewers of this place whose wider review history matches the user's taste. */
+  twins?: TasteTwin[];
   distanceM: number | null;
   points: Points | null;
   verdict: string | null;
@@ -140,3 +144,6 @@ export async function apiCall<T>(method: 'GET' | 'DELETE', path: string): Promis
   if (!res.ok) throw new Error(json.error || 'Request failed');
   return json as T;
 }
+
+export type MenuItem = { name: string; price: number | null; section: string | null; photo: number };
+export type Menu = { photos: { thumb: string; image: string }[]; items: MenuItem[]; read: number; cached: boolean };

@@ -1,4 +1,4 @@
-import { toolTurn, type Content, type FunctionDeclaration, type Part, type Usage } from './gemini.js';
+import { judgeTwins, toolTurn, type Content, type FunctionDeclaration, type Part, type Usage } from './gemini.js';
 import { dishQuery, fingerprint, haversine } from './geo.js';
 import { ANSWER_TTL, answerKey, appendChat, chatContext, learn, loadChat, loadMemory, messageId, type ChatMessage } from './chat.js';
 import { kvGet, kvSet } from './kv.js';
@@ -6,10 +6,11 @@ import { embedLater, present } from './pipeline.js';
 import { FOLLOWUP_SYSTEM, FOLLOWUP_TOOLS, PROMPT_VERSION, SEARCH_SYSTEM, SEARCH_TOOLS, followupTask, searchTask } from './prompts.js';
 import { fallbackPoints, preScore } from './rank.js';
 import { normalize } from './memory.js';
-import { cravingPlaces, drivingRoute, reviewPages, webSearch, type SerpPlace, type WebHit } from './serp.js';
+import { menuLines } from './menu.js';
+import { contributorReviews, cravingPlaces, drivingRoute, reviewPages, webSearch, type ContributorReview, type SerpPlace, type WebHit } from './serp.js';
 import { readFreshReviews, readSearchStore, recordSearch, rememberSearch, savePlaces, saveSearchSnapshot } from './store.js';
 import { assertHospitality } from './topic.js';
-import { HttpError, type Actor, type Place, type Review, type TraceStep } from './types.js';
+import { HttpError, type Actor, type Place, type Review, type Reviewer, type TasteTwin, type TraceStep } from './types.js';
 
 /*
  * YumFindAI as an agent. Gemini decides which SerpApi engines to call and when:
@@ -247,6 +248,26 @@ function sheet(state: State, lastStep: boolean) {
 
 // ---- Tool execution ---------------------------------------------------------------------------
 
+// ---- Reviewer identities (for Taste Twins) ------------------------------------------------------
+// place_reviews has no reviewer column, so who wrote each review is kept in Redis per place.
+
+const REVIEWER_TTL = 30 * 24 * 60 * 60;
+
+async function rememberReviewers(dataId: string, reviews: Review[]) {
+  const fresh = reviews.filter((review) => review.reviewer);
+  if (!fresh.length) return;
+  const key = `reviewers:${dataId}`;
+  const known = (await kvGet<Record<string, Reviewer>>(key)) ?? {};
+  for (const review of fresh) known[review.sourceId] = review.reviewer as Reviewer;
+  await kvSet(key, known, REVIEWER_TTL);
+}
+
+async function recallReviewers(dataId: string, reviews: Review[]) {
+  const known = await kvGet<Record<string, Reviewer>>(`reviewers:${dataId}`);
+  if (!known) return;
+  for (const review of reviews) review.reviewer ||= known[review.sourceId] ?? null;
+}
+
 function step(state: State, tool: string, say: string) {
   const id = ++state.stepId;
   state.emit({ type: 'step', id, tool, say, status: 'running' });
@@ -331,6 +352,7 @@ async function readOne(state: State, candidate: Candidate, more: boolean, justCa
     const seen = new Set(candidate.place.reviews.map((review) => review.sourceId));
     const added = result.reviews.filter((review) => !seen.has(review.sourceId));
     candidate.place.reviews = [...candidate.place.reviews, ...added];
+    void rememberReviewers(candidate.place.dataId, added).catch(() => undefined);
     candidate.nextToken = result.nextToken;
     candidate.reviewsRead = true;
     candidate.fromCache = false;
@@ -362,6 +384,9 @@ async function execReviews(state: State, args: Record<string, unknown>): Promise
   for (const candidate of unread) {
     const reviews = stored.get(candidate.place.dataId);
     if (!reviews?.length) continue;
+    await recallReviewers(candidate.place.dataId, reviews).catch(() => undefined);
+    // Reviews cached before reviewer ids were kept cannot feed Taste Twins: read those fresh once.
+    if (!reviews.some((review) => review.reviewer)) continue;
     candidate.place.reviews = reviews;
     candidate.reviewsRead = true;
     candidate.fromCache = true;
@@ -544,6 +569,82 @@ function newState(actor: Actor, user: { lat: number; lng: number }, radiusM: num
   };
 }
 
+// ---- Taste Twins ------------------------------------------------------------------------------
+
+const MAX_TWIN_CANDIDATES = 5;
+const TWIN_MATCH = 60;
+
+/**
+ * Finds reviewers of the ranked places who eat like the user: reads their wider review history
+ * (SerpApi google_maps_contributor_reviews, cached 7 days), has Gemini score each against the user's
+ * taste, attaches the twins to the places they reviewed, and nudges places twins loved up the list.
+ */
+async function matchTwins(state: State, places: Place[], taste: string) {
+  const picked = new Map<string, Reviewer>();
+  for (const place of places.slice(0, 4)) {
+    const seasoned = place.reviews
+      .filter((review) => review.reviewer && (review.reviewer.reviewCount ?? 0) >= 5)
+      .sort((a, b) => hits(b.snippet, state.focus) - hits(a.snippet, state.focus) || (b.reviewer?.reviewCount ?? 0) - (a.reviewer?.reviewCount ?? 0))
+      .slice(0, 2);
+    for (const review of seasoned) if (picked.size < MAX_TWIN_CANDIDATES) picked.set((review.reviewer as Reviewer).id, review.reviewer as Reviewer);
+  }
+  if (!picked.size) return places;
+
+  const done = step(state, 'taste_twins', 'Finding reviewers who eat like you');
+  const histories = await Promise.all(
+    [...picked.values()].map(async (reviewer) => {
+      const key = `contrib:${reviewer.id}`;
+      const cached = await kvGet<ContributorReview[]>(key);
+      if (cached) return { reviewer, history: cached };
+      state.serpCalls += 1;
+      try {
+        const history = await contributorReviews(reviewer.id, AbortSignal.timeout(12000));
+        void kvSet(key, history, 7 * 24 * 60 * 60).catch(() => undefined);
+        return { reviewer, history };
+      } catch {
+        return { reviewer, history: [] as ContributorReview[] };
+      }
+    }),
+  );
+  const candidates = histories
+    .filter((row) => row.history.length)
+    .map((row) => ({
+      id: row.reviewer.id,
+      name: row.reviewer.name,
+      history: row.history.slice(0, 12).map((item) => ({ place: item.place, type: item.type, rating: item.rating, snippet: clip(item.snippet, 120) })),
+    }));
+  const scores = await judgeTwins(taste, candidates).catch((error) => {
+    console.error('[twins]', error instanceof Error ? error.message : error);
+    return new Map<string, { match: number; why: string }>();
+  });
+
+  let found = 0;
+  const withTwins = places.map((place, index) => {
+    const twins: TasteTwin[] = [];
+    for (const review of place.reviews) {
+      const reviewer = review.reviewer;
+      const score = reviewer ? scores.get(reviewer.id) : undefined;
+      if (!reviewer || !score || score.match < TWIN_MATCH || twins.some((twin) => twin.name === reviewer.name)) continue;
+      twins.push({
+        name: reviewer.name || 'A reviewer',
+        photo: reviewer.photo,
+        localGuide: reviewer.localGuide,
+        match: score.match,
+        why: score.why,
+        rating: review.rating,
+        said: clip(review.snippet, 180),
+      });
+    }
+    twins.sort((a, b) => b.match - a.match);
+    found += twins.length;
+    // Twins who loved a place lift it; twins who disliked it drop it (about one slot per twin).
+    const lift = Math.max(-2, Math.min(2, twins.reduce((sum, twin) => sum + ((twin.rating ?? 3) >= 4 ? 1 : (twin.rating ?? 3) <= 2 ? -1 : 0), 0)));
+    return { place: { ...place, twins: twins.slice(0, 3) }, order: index - lift * 1.01 };
+  });
+  done(`${candidates.length} reviewers' histories read; ${found ? `${found} taste twin${found === 1 ? '' : 's'} found` : 'no close taste match yet'}`);
+  return withTwins.sort((a, b) => a.order - b.order).map((row) => row.place);
+}
+
 // ---- Search -----------------------------------------------------------------------------------
 
 export async function runSearchAgent(
@@ -625,11 +726,20 @@ export async function runSearchAgent(
     if (ordered.length >= 6) break;
   }
 
-  const saved = await savePlaces(actor, ordered);
+  const taste = [
+    `Craving: ${input.craving}`,
+    input.preferences.length || input.addons.length ? `Wants: ${[...input.preferences, ...input.addons].join(', ')}` : '',
+    memory.length ? `Remembered taste: ${memory.join('; ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('. ');
+  const matched = finish._fallback ? ordered : await matchTwins(state, ordered, taste);
+
+  const saved = await savePlaces(actor, matched);
   // Places that were read but not ranked still feed the review cache for the next search.
   const extra = [...state.candidates.values()]
     .filter((candidate) => candidate.reviewsRead && !candidate.fromCache && candidate.place.reviews.length)
-    .filter((candidate) => !ordered.some((place) => place.dataId === candidate.place.dataId))
+    .filter((candidate) => !matched.some((place) => place.dataId === candidate.place.dataId))
     .map((candidate) => candidate.place);
   if (extra.length) void savePlaces(actor, extra).catch((error) => console.error('[cache] reviews', error instanceof Error ? error.message : error));
 
@@ -699,7 +809,8 @@ export async function runFollowUpAgent(
     state.candidates.set(id, { key: id, serp: null, place: { ...place }, nextToken: null, reviewsRead: true, fromCache: true, route: null, webMentions: 0 });
   });
 
-  const places = [...state.candidates.values()].map((candidate) =>
+  const menus = await Promise.all([...state.candidates.values()].map((candidate) => menuLines(candidate.place.dataId).catch(() => [])));
+  const places = [...state.candidates.values()].map((candidate, index) =>
     compact({
       place_id: candidate.key,
       name: candidate.place.name,
@@ -708,6 +819,8 @@ export async function runFollowUpAgent(
       distance: distLabel(candidate.place.distanceM),
       verdict: candidate.place.verdict,
       reviews: reviewLines(candidate.place.reviews, state.focus, 5, 200),
+      taste_twins: candidate.place.twins?.map((twin) => ({ name: twin.name, match: twin.match, why: twin.why, said: twin.said })),
+      menu: menus[index],
     }),
   );
   const task = followupTask(input.question, chatContext(messages), memory, places);

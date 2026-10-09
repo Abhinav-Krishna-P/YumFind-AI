@@ -34,6 +34,41 @@
 }
 
 @layer base {
+  /* Slim brand scrollbars everywhere (no grey bar, no arrows); inset so they sit inside rounded cards. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 16px 0;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 75, 43, 0.28);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 75, 43, 0.55);
+  }
+
+  ::-webkit-scrollbar-button,
+  ::-webkit-scrollbar-corner {
+    display: none;
+    background: transparent;
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 75, 43, 0.35) transparent;
+    }
+  }
+
 html,
 body,
 #root {

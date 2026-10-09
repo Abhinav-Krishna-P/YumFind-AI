@@ -2,7 +2,7 @@
 
 <h1 align="center">YumFindAI</h1>
 
-<p align="center"><b>An AI agent that finds where to eat by reading what people said this month.</b></p>
+<p align="center"><b>Not just what's nearby: an AI agent that matches food to <i>your</i> taste, using what people said this month.</b></p>
 
 <p align="center">
 SerpApi India Hackathon 2026 · Track: <b>Travel &amp; Local Discovery</b> · built as an <b>AI agent</b> on live Google data
@@ -10,15 +10,24 @@ SerpApi India Hackathon 2026 · Track: <b>Travel &amp; Local Discovery</b> · bu
 
 ---
 
-Tell YumFindAI where you are and what you're craving. Instead of showing every place that matches a keyword, an agent decides for itself which Google data to pull through SerpApi. It searches Google Maps around you and reads the newest reviews of the strongest candidates. When the evidence is thin it widens the radius or tries the local name of the dish, and it can cross-check food blogs on the web or check the drive time. Every step appears live on the map while it works, and the final ranking only includes places whose reviews it actually read.
+Google Maps can list every restaurant near you. YumFindAI answers a different question: **which of them fits you?** Tell it where you are, what you're craving and how you like it (mild or spicy, veg, family-friendly). Instead of showing every place that matches a keyword, an agent decides for itself which Google data to pull through SerpApi. It searches Google Maps around you and reads the newest reviews of the strongest candidates. When the evidence is thin it widens the radius or tries the local name of the dish, and it can cross-check food blogs on the web or check the drive time. Every step appears live on the map while it works, and the final ranking only includes places whose reviews it actually read.
 
-Then you can **chat about the results**: *"Which one is least spicy?"* … *"Does it have parking?"* It remembers the conversation and your taste.
+Two things no map app does:
+
+- **Taste Twins.** A 4.5★ average mixes everyone's opinion. YumFindAI finds the reviewers of each place **who eat like you**: it reads their wider Google review history, scores how close their taste is to yours, and shows what *they* said. Places your taste twins loved move up the list.
+- **Menu & prices.** Most restaurants post photos of their menu on Google Maps, but nobody wants to zoom through 20 photos. YumFindAI reads them into a searchable price list, puts the dishes matching your craving on top, and lets the chat answer *"how much is a biryani here?"*
+- **Snap a dish.** Saw something tasty on Instagram? Upload or take a photo. Google Lens names the dish and YumFindAI finds who makes it best near you, your way.
+
+Then you can **chat about the results**: *"Which one is least spicy?"* … *"Does it have parking?"* … *"What did my taste twins say?"* It remembers the conversation and your taste.
 
 ## Contents
 
 - [What it does](#what-it-does)
 - [How the agent works](#how-the-agent-works)
 - [SerpApi usage](#serpapi-usage)
+- [Taste Twins](#taste-twins)
+- [Menu & prices](#menu--prices)
+- [Snap a dish](#snap-a-dish)
 - [Chat, memory and caching](#chat-memory-and-caching)
 - [Keeping tokens and credits down](#keeping-tokens-and-credits-down)
 - [Meet the mascot](#meet-the-mascot)
@@ -40,16 +49,19 @@ Then you can **chat about the results**: *"Which one is least spicy?"* … *"Doe
 | Opaque | A **live trace** of every SerpApi call the agent chose, plus a "How YumFindAI decided" log with the run's cost |
 | Opening hours you have to read | **"Closes in 40 min · ~12 min away, cutting it close"**: Maps hours combined with drive time |
 | Reviews you have to skim | **Dishes reviewers praise** as chips, checked against the reviews the agent read |
+| Everyone's rating counts the same | **Taste Twins**: reviewers whose own review history matches your taste, and what they said here |
+| Menu photos you have to zoom through | **Menu & prices**: menu photos read into a searchable price list |
+| Search by typing | **Snap a dish**: a photo becomes a search (Google Lens) |
 | Follow-ups start over | **Ask about these** opens a chat that remembers the conversation and your taste across searches |
 
 The flow on screen:
 
 1. **Where are you?** *Locate me* (or drop a pin). YumFindAI shows the place name, for example "You're in Kozhikode".
-2. **What are you craving?** Type a dish, tap a category, or use the mic.
+2. **What are you craving?** Type a dish and how you like it, tap a category, use the mic, or **snap a photo** of a dish.
 3. **Radius and preferences.** Choose from 1–10 km, veg, spicy, family, quick bite, parking, outdoor seating or a pure veg kitchen.
-4. **The agent works live.** Candidate pins drop on the map while each SerpApi call appears with the reason it was made.
-5. **Ranked cards.** Each card shows a rating, a review verdict, praised dishes, positive and negative review counts, and whether the place will be open when you arrive.
-6. **Open a place.** You get the full review report grouped by tone, the exact drive time, and the route drawn on the map.
+4. **The agent works live.** Candidate pins drop on the map while each SerpApi call appears with the reason it was made, ending with **"Finding reviewers who eat like you"**.
+5. **Ranked cards.** Each card shows a rating, a review verdict, praised dishes, **"♥ 2 taste twins loved it"**, positive and negative review counts, and whether the place will be open when you arrive.
+6. **Open a place.** You get your taste twins and what they said, the **menu with prices**, the full review report grouped by tone, the exact drive time, and the route drawn on the map.
 7. **Ask about these.** Chat with the agent about the results.
 
 ## How the agent works
@@ -67,6 +79,10 @@ craving + location + radius + preferences + remembered taste
  │   get_directions  → SerpApi google_maps_directions     (drive time)               │
  │   finish          → ranked places, verdicts, review-support score, praised dishes │
  └──────────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+ Taste Twins → SerpApi google_maps_contributor_reviews (reviewer histories)
+             → Gemini scores each reviewer's taste against yours → twins re-rank the list
         │  events stream to the browser as newline-delimited JSON
         ▼
  map: pins drop as candidates are found → live step list → ranked cards → chat
@@ -90,8 +106,37 @@ All SerpApi calls are made server-side in [`server/src/serp.ts`](server/src/serp
 | `google_maps_reviews` | The newest reviews for shortlisted places, fetched several at a time in parallel; the agent can page deeper when the dish isn't mentioned yet | `data_id` / `place_id`, `sort_by=newestFirst`, `next_page_token` (resumable); reviews older than 90 days are dropped |
 | `google` (organic) | Cross-checking candidates against local food blogs and "best X in <area>" lists, or finding a dish's local name | `q`, `num=8`, `json_restrictor=organic_results[].{title,link,snippet}` |
 | `google_maps_directions` | Drive time when the user cares about distance; the exact drive time and route line when a place is opened | `start_coords`, `end_coords`, `travel_mode=0` |
+| `google_maps_contributor_reviews` | **Taste Twins**: what a reviewer of a ranked place has reviewed elsewhere, to judge whether their taste matches the user's | `contributor_id` (from each review's `user`); cached 7 days per reviewer |
+| `google_maps_photos` | **Menu & prices**: the place's photos in Google's "Menu" category, read by Gemini into dishes and prices | `data_id`, `category_id` (Menu); cached 14 days per place |
+| `google_lens` | **Snap a dish**: naming the dish in a user's photo | `url` (the photo, briefly hosted in Supabase Storage), `country=in`; uses `ai_overview` and `visual_matches` |
 
 SerpApi's own one-hour cache is left on, and on top of it YumFindAI avoids repeat calls with its own caches (below).
+
+## Taste Twins
+
+Star ratings average everyone. Taste Twins answers *"what do people who eat like me think of this place?"*
+
+1. When the agent reads reviews, it keeps each reviewer's Google contributor id, how many reviews they have written, and whether they are a Local Guide.
+2. After ranking, it picks up to 5 reviewers of the top places who have a real review history (5+ reviews), preferring those who wrote about your dish.
+3. It reads what each of them has reviewed elsewhere (`google_maps_contributor_reviews`, cached 7 days).
+4. One Gemini call scores every reviewer 0–100 against your taste: the craving, the chips you picked and what YumFindAI remembers about you. It has to cite evidence, for example *"Rates mild Lucknowi biryani highly at three places"*, and keeps reviewers with little food history below 55.
+5. Reviewers scoring 60+ become **taste twins**: they appear on the place with their match, the reason and their review of that place. Places they loved move up about one slot per twin; places they disliked move down.
+
+The step shows up live in the agent trace, and the chat can answer *"what did my taste twins say?"*
+
+## Menu & prices
+
+1. When you open a place and press **See menu & prices**, the server fetches its photos in Google's **Menu** category (`google_maps_photos`).
+2. Up to 6 photos are read in parallel by Gemini (vision): every dish with its price exactly as printed, grouped by menu section. A price that isn't readable stays blank; nothing is guessed.
+3. The place card shows the menu photos (tap to enlarge), a search box, the dishes matching your craving on top, and the full list by section.
+4. The result is cached in Redis for 14 days, so the first read takes about 15 seconds and later ones are instant (0.2 s). Once read, the chat uses it: *"How much is a chicken biryani at Malabar Menu?"* → *"A half portion is ₹110, a full is ₹150."*
+
+## Snap a dish
+
+1. The browser shrinks the photo to about 150 KB.
+2. The server puts it in a public Supabase Storage bucket (`dish-snaps`, created on first use) because Google Lens needs a public URL, and deletes it right after the lookup.
+3. `google_lens` returns an AI overview and visually similar pages; one Gemini call turns those into a searchable dish name (*"masala dosa"*, 95% confidence) or rejects photos that aren't food.
+4. The normal taste-matched search starts with that dish.
 
 ## Chat, memory and caching
 
@@ -196,6 +241,8 @@ It also blinks, follows the pointer, cheers up on hover and hops when tapped. Al
 | `POST /api/topic` | user | The topic gate on its own (food, restaurants and hotels only). |
 | `POST /api/directions` | user | Driving route and time for the map. |
 | `POST /api/visits` | user | Records that the user opened a place. |
+| `POST /api/place/menu` | user | Menu & prices for a place: `{ photos, items: [{ name, price, section }], read, cached }`. |
+| `POST /api/dish/identify` | user | Snap a dish: a photo (data URL) in, `{ dish, confidence }` out, via Google Lens. |
 | `POST /api/where` | public | Place name for a coordinate, so Home can say where you are before login. |
 | `GET /api/health` | public | Which services are configured, and whether the cache is on Redis. |
 | `POST /api/nearby`, `/api/search`, `/api/followup` | user | The earlier fixed pipeline, kept as a fallback; the app no longer calls them. |
@@ -209,6 +256,8 @@ client/
   src/pages/              Home (locate → craving), Login/Signup, Dashboard (map), Profile
   src/components/
     ChatPanel.tsx         the "Ask about these" chat
+    SnapButton.tsx        Snap a dish: camera or upload, resize, identify
+    MenuSection.tsx       Menu & prices in the place card
     AgentTrace.tsx        live list of the agent's SerpApi calls
     MapCanvas.tsx         MapLibre map, photo pins, route line
     mascot/               the YumFindAI character: drawing, moods, motion
@@ -219,7 +268,9 @@ client/
     supabase.ts           auth client with "Remember me" storage
   public/brand/           logo, mark and mascot as SVG and PNG
 server/src/
-  agent.ts                the agent loop: tools, budget, flat context, fallback, chat turns
+  agent.ts                the agent loop: tools, budget, flat context, fallback, Taste Twins, chat turns
+  lens.ts                 Snap a dish: temporary photo hosting + Google Lens
+  menu.ts                 Menu & prices: Google Maps menu photos read by Gemini
   prompts.ts              every prompt and tool description, versioned
   serp.ts                 every SerpApi call
   gemini.ts               Gemini REST client: function calling, embeddings, topic gate
@@ -242,6 +293,9 @@ Before the final push, these were verified end to end against the running app wi
 - off-topic searches and chat messages are refused
 - a saved search reloads from cache with 0 SerpApi calls, with hours, dishes, reviews and sentiment
 - chat answers, a follow-up resolves "it" from memory, history is stored in Redis, taste memory is learned, and clearing works
+- Taste Twins on live searches: reviewer histories are read and scored, and twins come with evidence (e.g. *"Frequently eats and praises Kerala beef dishes like beef kondattam"*, 78% match)
+- Menu & prices: Farsa (178 dishes from 6 photos, 14 s) and Malabar Menu (34 dishes with prices, e.g. Special Chicken Biriyani half ₹110 / full ₹150); cached reads in 0.2 s; the chat answered a price question from the menu
+- Snap a dish: a masala dosa photo was named *"masala dosa"* (95%) and the temporary photo was deleted afterwards
 - visits are recorded and profile counts are readable under RLS
 - with SerpApi out of credits, a new search ends cleanly with a clear message instead of an error
 
@@ -253,6 +307,9 @@ Live agent runs were measured on earlier test searches (see [Keeping tokens and 
 - **Review coverage.** Some areas have few reviews in the last 3 months. The agent says so instead of guessing, and dish chips stay empty when no dish is named.
 - **Web search latency.** SerpApi's Google engine is occasionally slow, so web lookups time out after 8 seconds and the agent carries on without them.
 - **Drive time on cards is an estimate** from distance; opening a place fetches the real one.
+- **Taste Twins need reviewers with a history.** Many recent reviewers have written only a few reviews, so some places show no twins; the agent never invents one.
+- **Menus** depend on what restaurants post; some photos show dishes without readable prices, which stay blank.
+- **Snap a dish** needs the Supabase service role key (for the temporary photo bucket) and costs one Lens search per photo.
 - **Location.** It comes from the browser, or from a pin you drop. YumFindAI keeps it only for the browser session.
 
 ## AI tools used in building this

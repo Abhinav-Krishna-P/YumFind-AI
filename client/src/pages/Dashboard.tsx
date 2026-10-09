@@ -3,12 +3,14 @@ import { CATEGORIES, Logo, Photo, useTitle } from '@/components/brand';
 import { LogoMark, Mascot, useInputGaze } from '@/components/mascot/Mascot';
 import { AgentTrace, agentMood } from '@/components/AgentTrace';
 import { ChatPanel, type ChatAnswer } from '@/components/ChatPanel';
-import { api, apiStream, upsertStep, type AgentStep, type Place, type RunUsage, type TraceStep } from '@/lib/api';
+import { SnapButton, type SnapState } from '@/components/SnapButton';
+import { MenuSection } from '@/components/MenuSection';
+import { api, apiStream, upsertStep, type AgentStep, type Place, type RunUsage, type TasteTwin, type TraceStep } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { readSpot, saveSpot } from '@/lib/spot';
 import { estimateDriveMin, parseDuration, timing, type Timing } from '@/lib/hours';
 import { distanceLabel, rupees } from '@/lib/utils';
-import { Clock, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
+import { BadgeCheck, Clock, ChevronDown, Heart, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -96,6 +98,7 @@ export function Dashboard() {
   const [usage, setUsage] = useState<RunUsage | null>(null);
   const [showTrace, setShowTrace] = useState(false);
   const [listening, setListening] = useState(false);
+  const [snap, setSnap] = useState<SnapState>({ status: 'idle' });
   const [resultsAt, setResultsAt] = useState(0);
   const [chipAt, setChipAt] = useState(0);
   const greeting = useBeat(1, 2600);
@@ -166,7 +169,7 @@ export function Dashboard() {
     setRoute(null);
     setRouteNote('');
     setHeadline('You are here');
-    setReason('Search for a dish. Nearby restaurants stay hidden until you do.');
+    setReason("Tell me what you're craving and how you like it. I'll match places to your taste.");
     setPhase('located');
   }
 
@@ -384,7 +387,7 @@ export function Dashboard() {
           <div className="sheet max-w-[600px] p-[22px]">
             <div className="flex items-center gap-3.5">
               <Mascot
-                mood={listening ? 'listening' : cravingGaze.focused ? 'curious' : 'idle'}
+                mood={snap.status === 'working' ? 'searching' : snap.status === 'error' ? 'sad' : listening ? 'listening' : cravingGaze.focused ? 'curious' : 'idle'}
                 size={68}
                 follow
                 lookAt={cravingGaze.point}
@@ -399,7 +402,7 @@ export function Dashboard() {
             <form onSubmit={(event) => void submitCraving(event)} className="mt-4 flex gap-2 rounded-[18px] bg-mist p-1.5" style={{ boxShadow: '0 0 0 1.5px #ece8ee' }}>
               <Search className="my-auto ml-2.5 flex-none text-faint" size={19} strokeWidth={2.5} />
               <input
-                placeholder="Biryani, cafe, or hotel"
+                placeholder="Mild chicken biryani, spicy beef fry..."
                 value={craving}
                 onChange={(event) => setCraving(event.target.value)}
                 aria-label="What are you craving?"
@@ -407,6 +410,16 @@ export function Dashboard() {
                 {...cravingGaze.bind}
               />
               <Mic onText={setCraving} onListening={setListening} />
+              <SnapButton
+                className="h-[46px] w-[46px]"
+                onChange={(state) => {
+                  setSnap(state);
+                  if (state.status === 'done' && state.dish) {
+                    setCraving(state.dish);
+                    void advance(state.dish);
+                  }
+                }}
+              />
               <button type="submit" className="btn-primary h-[46px] flex-none rounded-xl px-5 shadow-none">
                 Search
               </button>
@@ -424,7 +437,9 @@ export function Dashboard() {
                 </button>
               ))}
             </div>
-            <p className="mb-0 mt-3 text-xs text-faint">Food, restaurants, and hotels only.</p>
+            {snap.status === 'working' ? <p className="mb-0 mt-3 text-xs font-semibold text-tomato">Looking at your photo with Google Lens...</p> : null}
+            {snap.status === 'error' ? <p className="mb-0 mt-3 text-xs font-semibold text-[#d42a35]">{snap.message}</p> : null}
+            <p className="mb-0 mt-3 text-xs text-faint">Food, restaurants, and hotels only. Tap the camera to search by a photo of a dish.</p>
           </div>
         ) : null}
 
@@ -432,7 +447,7 @@ export function Dashboard() {
           <div className="sheet max-h-[56vh] max-w-[600px] overflow-auto p-[22px]">
             <div className="flex items-center gap-3">
               <Mascot mood={chipCheer ? 'happy' : 'idle'} size={56} follow steam={false} className="flex-none" />
-              <p className="m-0 font-display text-2xl font-semibold">Radius and preferences</p>
+              <p className="m-0 font-display text-2xl font-semibold">How do you like it?</p>
             </div>
             <ChipGroup title="Radius">
               {RADII.map((item, i) => (
@@ -511,7 +526,7 @@ export function Dashboard() {
         ) : null}
 
         {phase === 'place' && selected ? (
-          <PlaceCard place={selected} routeNote={routeNote} driveMin={parseDuration(route?.duration)} onClose={closePlace} />
+          <PlaceCard place={selected} craving={craving} routeNote={routeNote} driveMin={parseDuration(route?.duration)} onClose={closePlace} />
         ) : null}
 
         {phase === 'error' ? (
@@ -650,6 +665,7 @@ function ResultCard({ place, rank, onOpen }: { place: Place; rank: number; onOpe
           {place.address ? <p className="m-0 mt-px overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium text-muted">{place.address}</p> : null}
           <p className={`mb-0 mt-2 text-[13px] leading-[1.45] text-ink-2 ${expanded ? '' : 'line-clamp-2'}`}>{review}</p>
           <Dishes dishes={place.dishes} small />
+          <TwinsBadge twins={place.twins} />
           <OpenLine timing={timing(place.hours, estimateDriveMin(place.distanceM))} small />
         </div>
       </button>
@@ -715,6 +731,80 @@ function OpenLine({ timing: value, small = false }: { timing: Timing | null; sma
   );
 }
 
+function TwinAvatar({ twin, size }: { twin: TasteTwin; size: number }) {
+  return twin.photo ? (
+    <img
+      src={twin.photo}
+      alt=""
+      referrerPolicy="no-referrer"
+      className="flex-none rounded-full border-2 border-white object-cover"
+      style={{ width: size, height: size }}
+    />
+  ) : (
+    <span
+      className="grid flex-none place-items-center rounded-full border-2 border-white font-display font-bold text-ink"
+      style={{ width: size, height: size, background: 'var(--grad-coin)', fontSize: size * 0.42 }}
+    >
+      {twin.name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+/** "♥ 2 taste twins loved it" on a result card. */
+function TwinsBadge({ twins }: { twins?: TasteTwin[] }) {
+  if (!twins?.length) return null;
+  const loved = twins.filter((twin) => (twin.rating ?? 0) >= 4).length;
+  const label = loved
+    ? `${loved} taste twin${loved === 1 ? '' : 's'} loved it`
+    : `${twins.length} taste twin${twins.length === 1 ? '' : 's'} reviewed it`;
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-xl bg-[#fff0f3] px-2 py-1.5 text-[11px] font-bold text-[#c2185b]">
+      <span className="flex -space-x-2">
+        {twins.slice(0, 3).map((twin) => (
+          <TwinAvatar key={twin.name} twin={twin} size={20} />
+        ))}
+      </span>
+      <Heart size={12} strokeWidth={2.75} className="flex-none fill-current" />
+      <span className="min-w-0 truncate">{label}</span>
+    </div>
+  );
+}
+
+/** Reviewers who eat like the user, why they match, and what they said here. */
+function TwinsSection({ twins }: { twins?: TasteTwin[] }) {
+  if (!twins?.length) return null;
+  return (
+    <section className="mt-4 rounded-2xl bg-[#fff0f3] p-3.5" style={{ animation: 'fadeUp .4s ease backwards' }}>
+      <p className="m-0 flex items-center gap-1.5 font-display text-[17px] font-semibold text-[#c2185b]">
+        <Heart size={15} strokeWidth={2.75} className="fill-current" />
+        Your taste twins
+      </p>
+      <p className="m-0 mt-0.5 text-xs font-medium text-muted">Reviewers here whose other reviews match how you like your food.</p>
+      <div className="mt-2.5 flex flex-col gap-2">
+        {twins.map((twin) => (
+          <div key={twin.name} className="flex gap-2.5 rounded-xl bg-white p-2.5">
+            <TwinAvatar twin={twin} size={34} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-bold text-ink">
+                <span>{twin.name}</span>
+                {twin.localGuide ? (
+                  <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-muted">
+                    <BadgeCheck size={12} strokeWidth={2.5} /> Local Guide
+                  </span>
+                ) : null}
+                <span className="rounded-full bg-[#c2185b] px-1.5 py-px text-[10px] font-bold text-white">{twin.match}% match</span>
+                {twin.rating != null ? <span className="text-[11px] text-[#b45309]">{'★'.repeat(Math.round(twin.rating))}</span> : null}
+              </div>
+              <p className="m-0 mt-0.5 text-xs font-medium text-muted">{twin.why}</p>
+              <p className="m-0 mt-1 text-[13px] leading-snug text-ink-2">"{twin.said}"</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Dishes({ dishes, small = false }: { dishes?: string[]; small?: boolean }) {
   if (!dishes?.length) return null;
   return (
@@ -731,7 +821,7 @@ function Dishes({ dishes, small = false }: { dishes?: string[]; small?: boolean 
   );
 }
 
-function PlaceCard({ place, routeNote, driveMin, onClose }: { place: Place; routeNote: string; driveMin: number | null; onClose: () => void }) {
+function PlaceCard({ place, craving, routeNote, driveMin, onClose }: { place: Place; craving: string; routeNote: string; driveMin: number | null; onClose: () => void }) {
   const open = timing(place.hours, driveMin ?? estimateDriveMin(place.distanceM), driveMin != null);
   const reviews = place.reviews || [];
   const counts = sentimentOf(place);
@@ -780,6 +870,8 @@ function PlaceCard({ place, routeNote, driveMin, onClose }: { place: Place; rout
           ) : null}
           <OpenLine timing={open} />
           {place.address ? <p className="mb-0 mt-2.5 text-sm text-muted">{place.address}</p> : null}
+          <TwinsSection twins={place.twins} />
+          <MenuSection key={place.id} placeId={place.id} craving={craving} />
           {place.dishes?.length ? (
             <div className="mt-3">
               <p className="m-0 text-xs font-bold uppercase tracking-[.06em] text-faint">Reviewers love</p>

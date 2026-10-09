@@ -93,6 +93,7 @@ export function present(place: Place) {
     website: place.website,
     hours: place.hours,
     dishes: place.dishes,
+    twins: place.twins ?? [],
     distanceM: place.distanceM == null ? null : Math.round(place.distanceM),
     points: place.points,
     verdict: place.verdict,

@@ -256,8 +256,9 @@ export async function reviewPages(
         text((review.extracted_snippet as { original?: string } | undefined)?.original) ||
         '';
       if (!snippet) continue;
-      const user = review.user as { name?: string } | undefined;
+      const user = review.user as { name?: string; contributor_id?: string; thumbnail?: string; local_guide?: boolean; reviews?: number } | undefined;
       const author = text(user?.name);
+      const contributorId = text(user?.contributor_id);
       const sourceId =
         text(review.review_id) ||
         `${author || 'guest'}:${published.toISOString()}:${snippet.slice(0, 40)}`;
@@ -267,6 +268,9 @@ export async function reviewPages(
         rating: num(review.rating),
         snippet: snippet.slice(0, 500),
         publishedAt: published.toISOString(),
+        reviewer: contributorId
+          ? { id: contributorId, name: author, photo: text(user?.thumbnail), localGuide: user?.local_guide === true, reviewCount: num(user?.reviews) }
+          : null,
       });
     }
     const pagination = body.serpapi_pagination as { next_page_token?: string } | undefined;
@@ -274,6 +278,24 @@ export async function reviewPages(
     if (!token || sawOld) break;
   }
   return { reviews: collected, nextToken: sawOld ? null : token || null, sawOld };
+}
+
+export type ContributorReview = { place: string; type: string | null; rating: number | null; snippet: string };
+
+/** What one reviewer has reviewed elsewhere (SerpApi engine=google_maps_contributor_reviews). */
+export async function contributorReviews(contributorId: string, signal?: AbortSignal) {
+  const body = await callSerp({ engine: 'google_maps_contributor_reviews', contributor_id: contributorId }, signal);
+  const rows = Array.isArray(body.reviews) ? body.reviews : [];
+  const reviews: ContributorReview[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const item = row as Record<string, unknown>;
+    const info = (item.place_info || {}) as { title?: unknown; type?: unknown };
+    const place = text(info.title);
+    if (!place) continue;
+    reviews.push({ place, type: text(info.type), rating: num(item.rating), snippet: (text(item.snippet) || '').slice(0, 220) });
+  }
+  return reviews.slice(0, 20);
 }
 
 export type DrivingRoute = {

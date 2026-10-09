@@ -5,13 +5,15 @@ import { stream } from 'hono/streaming';
 import { runFollowUpAgent, runSearchAgent, type AgentEvent } from './agent.js';
 import { clearChat, forget, loadChat, loadMemory } from './chat.js';
 import { kvBackend } from './kv.js';
+import { identifyDish } from './lens.js';
+import { placeMenu } from './menu.js';
 import { env } from './env.js';
 import { validCoord } from './geo.js';
 import { askFollowUp, cleanLists, findFood, findNearby } from './pipeline.js';
 import { assertHospitality } from './topic.js';
 import { placeName } from './reverse.js';
 import { drivingRoute } from './serp.js';
-import { authClient, recordVisit } from './store.js';
+import { authClient, placeDataId, recordVisit } from './store.js';
 import { HttpError, type Actor } from './types.js';
 
 const RADII = new Set([1000, 2000, 5000, 10000]);
@@ -157,6 +159,22 @@ app.post('/api/agent/followup', async (c) => {
   const lng = Number(body.lng);
   const input = { fingerprint: body.fingerprint, question, ...(validCoord(lat, lng) ? { lat, lng } : {}) };
   return streamAgent(c, (emit) => runFollowUpAgent(user, input, emit));
+});
+
+// Menu & prices: the place's Google Maps menu photos, read into dishes and prices (cached 14 days).
+app.post('/api/place/menu', async (c) => {
+  const user = await actor(c);
+  const body = await c.req.json<{ placeId?: string }>();
+  const dataId = body.placeId ? await placeDataId(user, body.placeId) : null;
+  if (!dataId) throw new HttpError(404, 'That place is not saved yet');
+  return c.json(await placeMenu(dataId));
+});
+
+// Snap a dish: a food photo (data URL) becomes a dish name via Google Lens.
+app.post('/api/dish/identify', async (c) => {
+  await actor(c);
+  const body = await c.req.json<{ image?: string }>();
+  return c.json(await identifyDish(String(body.image || '')));
 });
 
 // Chat history and taste memory for one result set ("Ask about these"), stored in Redis.

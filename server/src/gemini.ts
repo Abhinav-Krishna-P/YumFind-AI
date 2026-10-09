@@ -138,16 +138,27 @@ ${JSON.stringify(dataFor(places, extra))}`;
 
 async function generate(system: string, user: string, timeoutMs = 20000) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.geminiModel}:generateContent?key=${env.gemini}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(timeoutMs),
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: { temperature: 0.4, responseMimeType: 'application/json' },
-    }),
-  });
+  const send = (thinking: boolean) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: {
+          temperature: 0.4,
+          responseMimeType: 'application/json',
+          ...(thinking ? { thinkingConfig: { thinkingLevel: env.geminiThinking } } : {}),
+        },
+      }),
+    });
+  const thinking = Boolean(env.geminiThinking) && thinkingAccepted;
+  let res = await send(thinking);
+  if (!res.ok && thinking && res.status === 400) {
+    thinkingAccepted = false;
+    res = await send(false);
+  }
   if (!res.ok) {
     console.error('[gemini] request failed', res.status);
     return null;
@@ -280,4 +291,102 @@ export async function toolTurn(
   const content = body.candidates?.[0]?.content;
   if (!content || !Array.isArray(content.parts)) return null;
   return { role: 'model', parts: content.parts };
+}
+
+// ---- Taste Twins ------------------------------------------------------------------------------
+
+const TWIN_JUDGE = `You compare food taste. You get the USER's taste and some Google reviewers, each with what else they have reviewed (place, place type, their rating, a snippet).
+For each reviewer give match 0-100: how likely they enjoy food the way this user does. Count only food places.
+High: they rate the same kind of dish, spice level, veg or family style highly. Low: their history is mostly not food, or points the other way. Under 4 food reviews stays below 55.
+why: max 14 words of concrete evidence from their reviews, e.g. "Rates mild Lucknowi biryani highly at three places". Never praise without evidence.
+Return JSON only: {"reviewers":[{"id":"","match":0,"why":""}]}`;
+
+export type TwinCandidate = {
+  id: string;
+  name: string | null;
+  history: { place: string; type: string | null; rating: number | null; snippet: string }[];
+};
+
+/** One call scores every candidate reviewer's taste against the user's. */
+export async function judgeTwins(taste: string, reviewers: TwinCandidate[]) {
+  const scores = new Map<string, { match: number; why: string }>();
+  if (!env.gemini || !reviewers.length) return scores;
+  const raw = await generate(TWIN_JUDGE, JSON.stringify({ user: taste, reviewers }), 25000);
+  if (!raw) return scores;
+  const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '')) as { reviewers?: { id?: string; match?: number; why?: string }[] };
+  for (const row of parsed.reviewers || []) {
+    if (!row.id || typeof row.match !== 'number') continue;
+    scores.set(row.id, { match: Math.max(0, Math.min(100, Math.round(row.match))), why: words(row.why || '', 16) });
+  }
+  return scores;
+}
+
+// ---- Snap a dish --------------------------------------------------------------------------------
+
+const DISH_FROM_LENS = `Google Lens looked at a photo. From its overview and the titles of visually similar pages, name the single dish in the photo.
+dish: a short, searchable dish name as an Indian diner would type it, e.g. "chicken biryani", "masala dosa", "kerala beef fry". null if the photo is not food.
+confidence: 0-100.
+Return JSON only: {"dish":"","confidence":0}`;
+
+export async function dishFromLens(overview: string, titles: string[]) {
+  if (!env.gemini) return null;
+  const raw = await generate(DISH_FROM_LENS, JSON.stringify({ overview, titles }), 15000);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '')) as { dish?: string | null; confidence?: number };
+  const dish = typeof parsed.dish === 'string' ? words(parsed.dish.trim(), 5) : '';
+  return { dish: dish || null, confidence: Math.max(0, Math.min(100, Math.round(Number(parsed.confidence) || 0))) };
+}
+
+// ---- Menu reader ----------------------------------------------------------------------------------
+
+const MENU_READER = `This photo comes from a restaurant's "Menu" photo section on Google Maps. It may be a menu, or just food or a signboard.
+If it shows a menu, list every dish with its price exactly as printed.
+- name: the dish as printed, with obvious spelling cleaned up.
+- price: a number in rupees, or null if it is not readable. Never guess a price.
+- section: the menu heading it sits under (e.g. "Biryani", "Starters"), or null.
+Return JSON only: {"is_menu":true,"items":[{"name":"","price":0,"section":""}]}`;
+
+export type MenuItem = { name: string; price: number | null; section: string | null; photo: number };
+
+/** Reads one photo (vision) into dishes and prices; null when it is not a menu or the call fails. */
+export async function readMenuPhoto(image: { mime: string; data: string }, photo: number): Promise<MenuItem[] | null> {
+  if (!env.gemini) return null;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.geminiModel}:generateContent?key=${env.gemini}`;
+  const send = (thinking: boolean) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(45000),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: MENU_READER }] },
+        contents: [{ role: 'user', parts: [{ inlineData: { mimeType: image.mime, data: image.data } }, { text: 'Read this menu. Return JSON only.' }] }],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          ...(thinking ? { thinkingConfig: { thinkingLevel: env.geminiThinking } } : {}),
+        },
+      }),
+    });
+  const thinking = Boolean(env.geminiThinking) && thinkingAccepted;
+  let res = await send(thinking);
+  if (!res.ok && thinking && res.status === 400) {
+    thinkingAccepted = false;
+    res = await send(false);
+  }
+  if (!res.ok) {
+    console.error('[gemini] menu read failed', res.status);
+    return null;
+  }
+  const body = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  const raw = body.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
+  const parsed = JSON.parse(raw.replace(/^```json\s*|```$/g, '')) as { is_menu?: boolean; items?: Partial<MenuItem>[] };
+  if (parsed.is_menu === false) return null;
+  const items: MenuItem[] = [];
+  for (const item of parsed.items || []) {
+    const name = typeof item.name === 'string' ? item.name.trim().slice(0, 60) : '';
+    if (!name) continue;
+    const price = typeof item.price === 'number' && Number.isFinite(item.price) && item.price > 0 && item.price < 100000 ? Math.round(item.price) : null;
+    items.push({ name, price, section: typeof item.section === 'string' && item.section.trim() ? item.section.trim().slice(0, 40) : null, photo });
+  }
+  return items;
 }

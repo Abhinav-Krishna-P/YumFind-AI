@@ -196,6 +196,7 @@ export async function saveSearchSnapshot(actor: Actor, snapshot: Snapshot) {
         verdict: place.verdict,
         evidence: place.evidence,
         dishes: place.dishes,
+        twins: place.twins ?? [],
         distanceM: place.distanceM,
       })),
     },
@@ -301,7 +302,7 @@ export async function readSearchStore(actor: Actor, fingerprint: string) {
     headline?: string;
     reason?: string;
     trace?: TraceStep[];
-    places?: { id: string; points: Place['points']; verdict: string | null; evidence: Place['evidence']; dishes?: string[]; distanceM: number | null }[];
+    places?: { id: string; points: Place['points']; verdict: string | null; evidence: Place['evidence']; dishes?: string[]; twins?: Place['twins']; distanceM: number | null }[];
   };
   const meta = new Map((score.places || []).map((place) => [place.id, place]));
   for (const place of places) {
@@ -311,6 +312,7 @@ export async function readSearchStore(actor: Actor, fingerprint: string) {
     place.verdict = row.verdict;
     place.evidence = row.evidence || place.evidence;
     place.dishes = row.dishes || [];
+    place.twins = row.twins || [];
     place.distanceM = row.distanceM;
   }
   const snapshot: Snapshot = {
@@ -366,4 +368,13 @@ export async function recordVisit(actor: Actor, placeId: string) {
   });
   log('visits', error);
   return !error;
+}
+
+/** The Google data_id behind one of our place ids (for on-demand lookups such as the menu). */
+export async function placeDataId(actor: Actor, placeId: string) {
+  const db = clientFor(actor.jwt);
+  if (!db) return null;
+  const { data, error } = await db.from('places').select('data_id').eq('id', placeId).maybeSingle();
+  log('place data id', error);
+  return data?.data_id ? String(data.data_id) : null;
 }

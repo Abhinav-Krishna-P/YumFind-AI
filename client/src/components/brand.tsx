@@ -30,7 +30,7 @@ export function Logo({ size = 38, text = 23, to = '/' }: { size?: number; text?:
 /** Sets the tab title, always ending in the product name. */
 export function useTitle(page?: string) {
   useEffect(() => {
-    document.title = page ? `${page} · YumFindAI` : 'YumFindAI · Find food nearby from fresh reviews';
+    document.title = page ? `${page} · YumFindAI` : 'YumFindAI · Food matched to your taste';
   }, [page]);
 }
 
