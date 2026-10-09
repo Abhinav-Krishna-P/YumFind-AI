@@ -56,18 +56,6 @@ export function Photo({
   );
 }
 
-/** Food photo inside a gradient ring, used for craving categories. */
-export function FoodRing({ src, size, ring = 4, border = 3 }: { src: string; size: number | string; ring?: number; border?: number }) {
-  return (
-    <span
-      className="block flex-none rounded-full"
-      style={{ width: size, height: size, padding: ring, background: 'var(--grad-ring)', boxShadow: '0 12px 28px rgba(255,122,61,.22)' }}
-    >
-      <Photo src={src} className="h-full w-full rounded-full bg-peach" style={{ border: `${border}px solid #fff`, background: 'var(--color-peach)' }} />
-    </span>
-  );
-}
-
 export function LiveDot({ color, size = 10 }: { color: string; size?: number }) {
   return (
     <span className="relative flex-none" style={{ width: size, height: size }}>

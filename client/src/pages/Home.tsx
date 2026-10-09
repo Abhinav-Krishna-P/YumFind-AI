@@ -1,4 +1,4 @@
-import { CATEGORIES, FoodRing, Logo, Photo, foodImg, useTitle } from '@/components/brand';
+import { Logo, Photo, foodImg, useTitle } from '@/components/brand';
 import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
 import { SnapButton, type SnapState } from '@/components/SnapButton';
 import { useSession } from '@/lib/session';
@@ -312,7 +312,7 @@ export function Home() {
         <HeroArt mood={mood} lookAt={input.point} bubble={bubble} />
       </section>
 
-      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-4 pt-6">
+      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-20 pt-6">
         <p className="m-0 text-[13px] font-extrabold uppercase tracking-[.1em] text-tomato">What a map app can't do</p>
         <h2 className="m-0 mt-1 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-[-.015em]">Not another map. A match for your taste.</h2>
         <p className="m-0 mt-1.5 max-w-[680px] text-base text-muted">
@@ -340,22 +340,6 @@ export function Home() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-20 pt-8">
-        <h2 className="m-0 mb-[18px] font-display text-[28px] font-semibold tracking-[-.01em]">What are you craving?</h2>
-        <div className="no-scrollbar flex gap-[clamp(14px,2.4vw,30px)] overflow-x-auto px-1 pb-3.5 pt-1.5">
-          {CATEGORIES.map((category, i) => (
-            <button
-              key={category.label}
-              onClick={() => pick(category.label)}
-              className="flex flex-none cursor-pointer flex-col items-center gap-2.5 border-none bg-transparent p-0 text-[15px] font-semibold text-ink-2 transition-transform duration-300 [transition-timing-function:var(--spring)] hover:-translate-y-1.5"
-              style={{ animation: `fadeUp .5s ease ${i * 50}ms backwards` }}
-            >
-              <FoodRing src={category.img} size="clamp(84px,9vw,116px)" />
-              {category.label}
-            </button>
-          ))}
-        </div>
-      </section>
 
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-[clamp(18px,4vw,56px)] py-6">
