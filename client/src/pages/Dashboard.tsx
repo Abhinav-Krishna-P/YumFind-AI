@@ -6,8 +6,9 @@ import { ChatPanel, type ChatAnswer } from '@/components/ChatPanel';
 import { api, apiStream, upsertStep, type AgentStep, type Place, type RunUsage, type TraceStep } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { readSpot, saveSpot } from '@/lib/spot';
+import { estimateDriveMin, parseDuration, timing, type Timing } from '@/lib/hours';
 import { distanceLabel, rupees } from '@/lib/utils';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
+import { Clock, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -510,7 +511,7 @@ export function Dashboard() {
         ) : null}
 
         {phase === 'place' && selected ? (
-          <PlaceCard place={selected} routeNote={routeNote} onClose={closePlace} />
+          <PlaceCard place={selected} routeNote={routeNote} driveMin={parseDuration(route?.duration)} onClose={closePlace} />
         ) : null}
 
         {phase === 'error' ? (
@@ -648,6 +649,8 @@ function ResultCard({ place, rank, onOpen }: { place: Place; rank: number; onOpe
           <h2 className="m-0 overflow-hidden text-ellipsis whitespace-nowrap font-display text-lg font-semibold">{place.name}</h2>
           {place.address ? <p className="m-0 mt-px overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium text-muted">{place.address}</p> : null}
           <p className={`mb-0 mt-2 text-[13px] leading-[1.45] text-ink-2 ${expanded ? '' : 'line-clamp-2'}`}>{review}</p>
+          <Dishes dishes={place.dishes} small />
+          <OpenLine timing={timing(place.hours, estimateDriveMin(place.distanceM))} small />
         </div>
       </button>
       {canExpand ? (
@@ -691,7 +694,45 @@ function toneOf(rating: number | null): Tone | null {
   return 'neutral';
 }
 
-function PlaceCard({ place, routeNote, onClose }: { place: Place; routeNote: string; onClose: () => void }) {
+const OPEN_TONES: Record<Timing['tone'], string> = {
+  good: '#137a41',
+  warn: '#b45309',
+  bad: '#c4222d',
+  muted: '#6b6870',
+};
+
+/** "Closes in 40 min · ~12 min away", coloured by whether you'd make it. */
+function OpenLine({ timing: value, small = false }: { timing: Timing | null; small?: boolean }) {
+  if (!value) return null;
+  return (
+    <p
+      className={`m-0 flex items-center gap-1.5 font-bold ${small ? 'mt-2 text-[11px]' : 'mt-3 text-sm'}`}
+      style={{ color: OPEN_TONES[value.tone] }}
+    >
+      <Clock size={small ? 12 : 15} strokeWidth={2.75} className="flex-none" />
+      <span className="min-w-0">{value.label}</span>
+    </p>
+  );
+}
+
+function Dishes({ dishes, small = false }: { dishes?: string[]; small?: boolean }) {
+  if (!dishes?.length) return null;
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${small ? 'mt-2' : 'mt-1.5'}`}>
+      {dishes.map((dish) => (
+        <span
+          key={dish}
+          className={`rounded-full bg-peach font-bold text-tomato-deep ${small ? 'px-2 py-[2px] text-[11px]' : 'px-2.5 py-1 text-xs'}`}
+        >
+          {dish}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PlaceCard({ place, routeNote, driveMin, onClose }: { place: Place; routeNote: string; driveMin: number | null; onClose: () => void }) {
+  const open = timing(place.hours, driveMin ?? estimateDriveMin(place.distanceM), driveMin != null);
   const reviews = place.reviews || [];
   const counts = sentimentOf(place);
   const meta = [
@@ -737,7 +778,14 @@ function PlaceCard({ place, routeNote, onClose }: { place: Place; routeNote: str
               {routeNote}
             </p>
           ) : null}
+          <OpenLine timing={open} />
           {place.address ? <p className="mb-0 mt-2.5 text-sm text-muted">{place.address}</p> : null}
+          {place.dishes?.length ? (
+            <div className="mt-3">
+              <p className="m-0 text-xs font-bold uppercase tracking-[.06em] text-faint">Reviewers love</p>
+              <Dishes dishes={place.dishes} />
+            </div>
+          ) : null}
           {place.verdict ? (
             <p className="mb-0 mt-3 rounded-2xl px-4 py-3 text-sm font-semibold text-[#7a4a00]" style={{ background: 'linear-gradient(135deg,#fff6d6,#ffeccc)' }}>
               {place.verdict}

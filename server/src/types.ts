@@ -46,11 +46,14 @@ export type Place = {
   thumbnail: string | null;
   phone: string | null;
   website: string | null;
+  hours: Record<string, string> | null;
   distanceM: number | null;
   reviews: Review[];
   points: Points | null;
   verdict: string | null;
   evidence: Evidence[];
+  /** Dishes recent reviews praise here, named by the agent and checked against the reviews. */
+  dishes: string[];
 };
 
 export type TraceStep = { tool: string; say: string; summary: string };

@@ -43,11 +43,13 @@ function toPlace(place: SerpPlace, distanceM: number | null): Place {
     thumbnail: place.thumbnail,
     phone: place.phone,
     website: place.website,
+    hours: place.hours,
     distanceM,
     reviews: [],
     points: null,
     verdict: null,
     evidence: [],
+    dishes: [],
   };
 }
 
@@ -89,6 +91,8 @@ export function present(place: Place) {
     thumbnail: place.thumbnail,
     phone: place.phone,
     website: place.website,
+    hours: place.hours,
+    dishes: place.dishes,
     distanceM: place.distanceM == null ? null : Math.round(place.distanceM),
     points: place.points,
     verdict: place.verdict,

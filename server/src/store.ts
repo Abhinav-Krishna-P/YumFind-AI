@@ -68,11 +68,13 @@ function placeFromRow(row: Record<string, unknown>, reviews: Review[] = []): Pla
     thumbnail: (row.thumbnail as string | null) ?? null,
     phone: (row.phone as string | null) ?? null,
     website: (row.website as string | null) ?? null,
+    hours: ((row.raw as { hours?: Record<string, string> } | null)?.hours) ?? null,
     distanceM: null,
     reviews,
     points: null,
     verdict: null,
     evidence: reviews.slice(0, 3).map((review) => ({ text: review.snippet, publishedAt: review.publishedAt })),
+    dishes: [],
   };
 }
 
@@ -98,6 +100,7 @@ export async function savePlaces(actor: Actor, places: Place[]) {
           thumbnail: place.thumbnail,
           phone: place.phone,
           website: place.website,
+          ...(place.hours ? { raw: { hours: place.hours } } : {}),
           fetched_at: new Date().toISOString(),
           static_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
           ...(place.reviews.length ? { reviews_cached_at: new Date().toISOString() } : {}),
@@ -192,6 +195,7 @@ export async function saveSearchSnapshot(actor: Actor, snapshot: Snapshot) {
         points: place.points,
         verdict: place.verdict,
         evidence: place.evidence,
+        dishes: place.dishes,
         distanceM: place.distanceM,
       })),
     },
@@ -297,7 +301,7 @@ export async function readSearchStore(actor: Actor, fingerprint: string) {
     headline?: string;
     reason?: string;
     trace?: TraceStep[];
-    places?: { id: string; points: Place['points']; verdict: string | null; evidence: Place['evidence']; distanceM: number | null }[];
+    places?: { id: string; points: Place['points']; verdict: string | null; evidence: Place['evidence']; dishes?: string[]; distanceM: number | null }[];
   };
   const meta = new Map((score.places || []).map((place) => [place.id, place]));
   for (const place of places) {
@@ -306,6 +310,7 @@ export async function readSearchStore(actor: Actor, fingerprint: string) {
     place.points = row.points;
     place.verdict = row.verdict;
     place.evidence = row.evidence || place.evidence;
+    place.dishes = row.dishes || [];
     place.distanceM = row.distanceM;
   }
   const snapshot: Snapshot = {

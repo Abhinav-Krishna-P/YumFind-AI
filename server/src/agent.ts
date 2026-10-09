@@ -182,12 +182,26 @@ function toPlace(serp: SerpPlace, user: { lat: number; lng: number }): Place {
     thumbnail: serp.thumbnail,
     phone: serp.phone,
     website: serp.website,
+    hours: serp.hours,
     distanceM: haversine(user.lat, user.lng, serp.lat, serp.lng),
     reviews: [],
     points: null,
     verdict: null,
     evidence: [],
+    dishes: [],
   };
+}
+
+const GENERIC_DISHES = /^(meals?|food|dishes|lunch|dinner|breakfast|snacks?|starters?|desserts?)$/i;
+
+/** Keeps only dish names the reviews actually mention (spelling-tolerant), at most three. */
+function praisedDishes(value: unknown, reviews: Review[]) {
+  if (!Array.isArray(value)) return [];
+  const names = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => clip(item, 28))
+    .filter((item) => item && !GENERIC_DISHES.test(item));
+  return names.filter((name) => reviews.some((review) => hits(review.snippet, focusWords(name)) > 0)).slice(0, 3);
 }
 
 function reviewWithFor(candidate: Candidate) {
@@ -602,7 +616,12 @@ export async function runSearchAgent(
     const base = fallbackPoints(candidate.place, state.radiusM);
     const reviews = clamp(row.review_support, 30);
     const points = { ...base, reviews, total: base.distance + base.rating + base.price + reviews, source: finish._fallback ? ('fallback' as const) : ('gemini' as const) };
-    ordered.push({ ...candidate.place, points, verdict: String(row.verdict || '').trim() || null });
+    ordered.push({
+      ...candidate.place,
+      points,
+      verdict: String(row.verdict || '').trim() || null,
+      dishes: praisedDishes(row.dishes, candidate.place.reviews),
+    });
     if (ordered.length >= 6) break;
   }
 

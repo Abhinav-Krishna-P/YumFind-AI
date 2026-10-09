@@ -4,7 +4,7 @@ import { HttpError } from './types.js';
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
 const RESTRICTOR =
-  'local_results[].{title,place_id,data_id,gps_coordinates,rating,reviews,price,open_state,thumbnail,address,phone,website}';
+  'local_results[].{title,place_id,data_id,gps_coordinates,rating,reviews,price,open_state,operating_hours,thumbnail,address,phone,website}';
 
 type Query = Record<string, string | number | boolean | undefined>;
 
@@ -58,6 +58,8 @@ export type SerpPlace = {
   thumbnail: string | null;
   phone: string | null;
   website: string | null;
+  /** Weekly hours as Google shows them, e.g. { monday: "11 am–1 am" }. */
+  hours: Record<string, string> | null;
 };
 
 function readPlaces(body: Record<string, unknown>): SerpPlace[] {
@@ -91,9 +93,16 @@ function readPlaces(body: Record<string, unknown>): SerpPlace[] {
       thumbnail: text(item.thumbnail),
       phone: text(item.phone),
       website: text(item.website),
+      hours: weekHours(item.operating_hours),
     });
   }
   return places;
+}
+
+function weekHours(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+  const days = Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string');
+  return days.length ? Object.fromEntries(days.map(([day, hours]) => [day.toLowerCase(), hours])) : null;
 }
 
 function noResults(error: unknown) {

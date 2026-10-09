@@ -5,7 +5,7 @@
 import type { FunctionDeclaration } from './gemini.js';
 
 /** Bump when prompts change; it is logged with each run so token and quality numbers stay comparable. */
-export const PROMPT_VERSION = 'agent-2026-10-08d';
+export const PROMPT_VERSION = 'agent-2026-10-09b';
 
 const WHY = {
   type: 'STRING',
@@ -71,6 +71,7 @@ export const SEARCH_TOOLS: FunctionDeclaration[] = [
               place_id: { type: 'STRING' },
               verdict: { type: 'STRING', description: 'Max 22 words from the reviews; say so if they never mention the dish.' },
               review_support: { type: 'INTEGER', description: '0-30: how strongly recent reviews back the craving and preferences.' },
+              dishes: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 3 specific dishes reviewers speak well of here (e.g. "mutton biryani", "kunafa"). Never a dish they criticise, never generic words like meals or food. Empty if none.' },
             },
             required: ['place_id', 'verdict', 'review_support'],
           },

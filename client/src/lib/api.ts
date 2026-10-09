@@ -22,6 +22,10 @@ export type Place = {
   thumbnail: string | null;
   phone: string | null;
   website: string | null;
+  /** Weekly hours from Google Maps, e.g. { monday: "11 am–1 am" }. */
+  hours?: Record<string, string> | null;
+  /** Dishes recent reviews praise here. */
+  dishes?: string[];
   distanceM: number | null;
   points: Points | null;
   verdict: string | null;
