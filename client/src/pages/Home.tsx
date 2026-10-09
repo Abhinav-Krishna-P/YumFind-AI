@@ -1,6 +1,5 @@
 import { Logo, Photo, foodImg, useTitle } from '@/components/brand';
 import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
-import { SnapButton, type SnapState } from '@/components/SnapButton';
 import { useSession } from '@/lib/session';
 import { currentPosition, placeNameFor, readSpot, saveSpot, type Spot } from '@/lib/spot';
 import { ArrowRight, BookOpen, Camera, Check, Heart, LocateFixed, Search, Sparkles } from 'lucide-react';
@@ -69,7 +68,6 @@ export function Home() {
   const [greeting, setGreeting] = useState(true);
   const [goHover, setGoHover] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [snap, setSnap] = useState<SnapState>({ status: 'idle' });
   const input = useInputGaze();
   const justFound = foundAt > 0 && Date.now() - foundAt < 2400;
 
@@ -121,15 +119,6 @@ export function Home() {
     void locate(label);
   }
 
-  /** Snap a dish: once Lens names it, show the name for a beat, then search for it. */
-  function onSnap(state: SnapState) {
-    setSnap(state);
-    if (state.status !== 'done' || !state.dish) return;
-    const dish = state.dish;
-    setCraving(dish);
-    window.setTimeout(() => pick(dish), 1100);
-  }
-
   function onSearch(event: FormEvent) {
     event.preventDefault();
     pick(craving);
@@ -138,19 +127,15 @@ export function Home() {
   const typing = Boolean(input.focused);
   const where = town(spot?.label ?? null);
   let mood: MascotMood = 'idle';
-  if (leaving || justFound || snap.status === 'done') mood = 'found';
-  else if (locating || snap.status === 'working') mood = 'searching';
-  else if (snap.status === 'error') mood = 'sad';
+  if (leaving || justFound) mood = 'found';
+  else if (locating) mood = 'searching';
   else if (locError) mood = 'sad';
   else if (goHover) mood = 'happy';
   else if (typing) mood = 'curious';
   else if (greeting && !spot) mood = 'wave';
 
   let bubble = { kind: 'ask', text: `What are you in the mood for${where ? ` in ${where}` : ''}? I'll match it to your taste.` };
-  if (snap.status === 'done' && snap.dish) bubble = { kind: 'snapped', text: `Looks like ${snap.dish}! Finding who makes it your way.` };
-  else if (snap.status === 'working') bubble = { kind: 'snapping', text: 'Looking at your photo...' };
-  else if (snap.status === 'error') bubble = { kind: 'snap-error', text: snap.message || "I couldn't tell what dish that is." };
-  else if (leaving) bubble = { kind: 'go', text: 'On it! Reading the reviews.' };
+  if (leaving) bubble = { kind: 'go', text: 'On it! Reading the reviews.' };
   else if (locating) bubble = { kind: 'locating', text: 'Looking around for you...' };
   else if (locError) bubble = { kind: 'error', text: "I can't see where you are. Drop a pin on the map?" };
   else if (!spot) bubble = { kind: 'hello', text: "Hi, I'm YumFindAI. First, where are you?" };
@@ -263,20 +248,6 @@ export function Home() {
                   className="min-w-0 flex-1 border-none bg-transparent px-1 py-3 text-base font-medium text-ink outline-none"
                   {...input.bind}
                 />
-                {session ? (
-                  <SnapButton onChange={onSnap} className="h-[46px] w-[46px]" />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => navigate('/login', { state: { next: '/' } })}
-                    aria-label="Log in to search by photo"
-                    title="Log in to search by photo"
-                    className="grid h-[46px] w-[46px] flex-none cursor-pointer place-items-center rounded-xl border-none bg-white text-tomato hover:bg-blush"
-                    style={{ boxShadow: '0 2px 8px rgba(28,26,31,.08)' }}
-                  >
-                    <Camera size={19} strokeWidth={2.5} />
-                  </button>
-                )}
                 <button
                   type="submit"
                   className="btn-primary flex-none px-[22px] py-3.5"
@@ -287,15 +258,6 @@ export function Home() {
                   <ArrowRight size={16} strokeWidth={2.75} />
                 </button>
               </form>
-              {snap.status === 'error' ? (
-                <p className="m-0 text-sm font-semibold text-[#d42a35]" style={{ animation: 'fadeUp .3s ease backwards' }}>
-                  {snap.message}
-                </p>
-              ) : (
-                <p className="m-0 flex items-center gap-1.5 text-[13px] font-medium text-faint">
-                  <Camera size={14} strokeWidth={2.5} /> Saw something tasty? Snap or upload a photo and YumFindAI finds who makes it near you.
-                </p>
-              )}
               <div className="flex flex-wrap gap-2">
                 {QUICK_PICKS.map((label) => (
                   <button key={label} className="pill-link" onClick={() => pick(label)}>
