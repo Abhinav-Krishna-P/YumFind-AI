@@ -8,6 +8,18 @@
 SerpApi India Hackathon 2026 · Track: <b>Travel &amp; Local Discovery</b> · built as an <b>AI agent</b> on live Google data
 </p>
 
+## Demo
+
+<p align="center">
+  <a href="docs/media/yumfindai-promo.mp4"><img src="docs/media/yumfindai-promo-preview.gif" alt="YumFindAI in 30 seconds: type a craving, the agent reads reviews live through SerpApi, ranked results, Taste Twins and menu prices" width="360"></a>
+</p>
+
+<p align="center">
+  ▶️ <a href="docs/media/yumfindai-promo.mp4"><b>Watch the 30-second promo</b></a> &nbsp;·&nbsp; 🎬 <a href="docs/media/yumfindai-walkthrough.mp4"><b>Watch the full 2-minute walkthrough</b></a>
+</p>
+
+The walkthrough is recorded from real runs of the app (waits are sped up): *"unlimited biryani near me"* in Kozhikode → the agent's live SerpApi calls → ranked results → a follow-up question in the chat → Biriyani Durbar's review report with its Taste Twin and menu prices.
+
 ---
 
 Google Maps can list every restaurant near you. YumFindAI answers a different question: **which of them fits you?** Tell it where you are, what you're craving and how you like it (mild or spicy, veg, family-friendly). Instead of showing every place that matches a keyword, an agent decides for itself which Google data to pull through SerpApi. It searches Google Maps around you and reads the newest reviews of the strongest candidates. When the evidence is thin it widens the radius or tries the local name of the dish, and it can cross-check food blogs on the web or check the drive time. Every step appears live on the map while it works, and the final ranking only includes places whose reviews it actually read.
@@ -22,6 +34,7 @@ Then you can **chat about the results**: *"Which one is least spicy?"* … *"Doe
 
 ## Contents
 
+- [Demo](#demo)
 - [What it does](#what-it-does)
 - [How the agent works](#how-the-agent-works)
 - [SerpApi usage](#serpapi-usage)
@@ -322,4 +335,4 @@ Live agent runs were measured on earlier test searches (see [Keeping tokens and 
 
 ## AI tools used in building this
 
-Claude Code (Anthropic) was used as a coding assistant for the UI, the mascot and brand assets, and the agent loop; the author reviewed and ran the code. Gemini is used at runtime as described above. The visual design was prototyped with Claude Design.
+Claude Code (Anthropic) was used as a coding assistant for the UI, the mascot and brand assets, and the agent loop; the author reviewed and ran the code. Gemini is used at runtime as described above. The visual design was prototyped with Claude Design. The demo videos were recorded by a Claude Code–written browser script driving the real app, then edited (zooms, captions, motion graphics, sound) with Claude Code; the narration is Microsoft Edge neural text-to-speech.
