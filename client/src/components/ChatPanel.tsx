@@ -129,8 +129,8 @@ export function ChatPanel({
       style={{ boxShadow: '0 24px 60px rgba(28,26,31,.22)', animation: 'sheetIn .5s cubic-bezier(.2,1.2,.4,1) backwards' }}
       aria-label="Chat with YumFindAI about these places"
     >
-      <header className="flex flex-none items-center gap-3 border-b border-line px-4 py-3">
-        <Mascot mood={mood} size={48} steam={false} shadow={false} follow lookAt={input.point} className="flex-none" />
+      <header className="flex flex-none items-center gap-2.5 border-b border-line px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <Mascot mood={mood} size={44} steam={false} shadow={false} follow lookAt={input.point} className="flex-none" />
         <div className="min-w-0 flex-1">
           <p className="m-0 font-display text-lg font-semibold leading-tight">Ask YumFindAI</p>
           <p className="m-0 truncate text-xs font-medium text-muted">
@@ -143,7 +143,7 @@ export function ChatPanel({
           disabled={!messages.length || Boolean(pending)}
           aria-label="Clear this chat"
           title="Clear chat"
-          className="grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-full border-none bg-transparent text-muted hover:bg-mist hover:text-tomato disabled:cursor-default disabled:opacity-40"
+          className="grid h-10 w-10 flex-none cursor-pointer place-items-center rounded-full border-none bg-transparent text-muted hover:bg-mist hover:text-tomato disabled:cursor-default disabled:opacity-40"
         >
           <Trash2 size={16} strokeWidth={2.25} />
         </button>
@@ -151,7 +151,7 @@ export function ChatPanel({
           type="button"
           onClick={onClose}
           aria-label="Close chat"
-          className="grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-full border-none bg-mist text-ink hover:text-tomato"
+          className="grid h-10 w-10 flex-none cursor-pointer place-items-center rounded-full border-none bg-mist text-ink hover:text-tomato"
         >
           <X size={17} strokeWidth={2.5} />
         </button>
@@ -163,13 +163,13 @@ export function ChatPanel({
           <span className="min-w-0 flex-1 truncate" title={memory.join(' · ')}>
             {memory.join(' · ')}
           </span>
-          <button type="button" onClick={() => void forgetMemory()} className="flex-none cursor-pointer border-none bg-transparent p-0 text-xs font-bold text-tomato hover:underline">
+          <button type="button" onClick={() => void forgetMemory()} className="flex-none cursor-pointer border-none bg-transparent px-1 py-1 text-xs font-bold text-tomato hover:underline">
             Forget
           </button>
         </div>
       ) : null}
 
-      <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4" aria-live="polite">
+      <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4" aria-live="polite">
         {loading ? <p className="m-0 text-center text-sm text-faint">Loading your chat...</p> : null}
         {empty ? (
           <div className="flex items-start gap-2.5" style={{ animation: 'fadeUp .3s ease backwards' }}>
@@ -217,13 +217,14 @@ export function ChatPanel({
         ) : null}
       </div>
 
-      <form onSubmit={onSubmit} className="flex flex-none items-center gap-2 border-t border-line p-3">
+      <form onSubmit={onSubmit} className="flex flex-none items-center gap-2 border-t border-line p-2.5 sm:p-3">
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder="Ask about spice, parking, families..."
           aria-label="Message YumFindAI"
           maxLength={240}
+          enterKeyHint="send"
           className="h-11 min-w-0 flex-1 rounded-xl border-[1.5px] border-line-2 bg-mist px-3.5 text-sm font-medium text-ink outline-none focus:border-tomato focus:bg-white"
           {...input.bind}
         />
@@ -243,7 +244,7 @@ export function ChatPanel({
 function UserBubble({ text }: { text: string }) {
   return (
     <div className="flex justify-end" style={{ animation: 'fadeUp .3s ease backwards' }}>
-      <div className="max-w-[82%] rounded-2xl rounded-tr-md px-3.5 py-2.5 text-sm font-medium leading-relaxed text-white" style={{ background: 'var(--grad)' }}>
+      <div className="max-w-[86%] break-words rounded-2xl rounded-tr-md px-3.5 py-2.5 text-sm font-medium leading-relaxed text-white sm:max-w-[82%]" style={{ background: 'var(--grad)' }}>
         {text}
       </div>
     </div>
@@ -257,7 +258,7 @@ function AssistantBubble({ message, onShowPlace }: { message: ChatMessage; onSho
     <div className="flex items-start gap-2.5" style={{ animation: 'fadeUp .3s ease backwards' }}>
       <LogoMark size={26} className="mt-1 flex-none" />
       <div className="min-w-0 max-w-[86%]">
-        <div className="rounded-2xl rounded-tl-md bg-mist px-3.5 py-2.5 text-sm leading-relaxed text-ink">{message.text}</div>
+        <div className="break-words rounded-2xl rounded-tl-md bg-mist px-3.5 py-2.5 text-sm leading-relaxed text-ink">{message.text}</div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           {message.placeId && message.placeName ? (
             <button
@@ -274,7 +275,7 @@ function AssistantBubble({ message, onShowPlace }: { message: ChatMessage; onSho
             <button
               type="button"
               onClick={() => setOpen((value) => !value)}
-              className="cursor-pointer border-none bg-transparent p-0 text-[11px] font-bold text-tomato hover:underline"
+              className="cursor-pointer border-none bg-transparent px-0 py-1 text-[11px] font-bold text-tomato hover:underline"
             >
               {open ? 'Hide steps' : `How I checked · ${steps.length} step${steps.length === 1 ? '' : 's'}`}
             </button>

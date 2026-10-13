@@ -1,0 +1,16 @@
+{
+  "name": "YumFindAI · Food matched to your taste",
+  "short_name": "YumFindAI",
+  "description": "An AI agent that learns your taste, reads this month's Google reviews and picks the places that fit you.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ff4b2b",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

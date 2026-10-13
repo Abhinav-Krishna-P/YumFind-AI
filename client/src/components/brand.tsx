@@ -2,7 +2,8 @@ import { LogoMark } from '@/components/mascot/Mascot';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 
-export const foodImg = (id: string) => `https://images.unsplash.com/photo-${id}?w=700&h=700&q=70&auto=format&fit=crop`;
+/** An Unsplash food photo, cropped square. Ask for roughly 2x the size it is shown at, not more. */
+export const foodImg = (id: string, size = 700) => `https://images.unsplash.com/photo-${id}?w=${size}&h=${size}&q=70&auto=format&fit=crop`;
 
 export const CATEGORIES = [
   ['Biryani', '1563379091339-03b21ab4a4f8'],
@@ -13,14 +14,14 @@ export const CATEGORIES = [
   ['Pasta', '1621996346565-e3dbc646d9a9'],
   ['Idly', '1589301760014-d929f3979dbc'],
   ['Samosa', '1601050690597-df0568f70950'],
-].map(([label, id]) => ({ label, img: foodImg(id) }));
+].map(([label, id]) => ({ label, img: foodImg(id, 160) }));
 
 /** The YumFindAI lockup: the mascot's pin as the mark, then the wordmark. */
-export function Logo({ size = 38, text = 23, to = '/' }: { size?: number; text?: number; to?: string }) {
+export function Logo({ size = 38, text = 23, to = '/', textClassName = '' }: { size?: number; text?: number; to?: string; textClassName?: string }) {
   return (
     <Link to={to} aria-label="YumFindAI home" className="flex flex-none items-center gap-2 text-ink no-underline hover:text-ink">
       <LogoMark size={size} />
-      <span className="font-display font-bold tracking-[-.01em]" style={{ fontSize: text }} aria-hidden="true">
+      <span className={`font-display font-bold tracking-[-.01em] ${textClassName}`} style={{ fontSize: text }} aria-hidden="true">
         YumFind<span className="text-tomato">AI</span>
       </span>
     </Link>
@@ -40,17 +41,28 @@ export function Photo({
   className = '',
   imgClassName = '',
   style,
+  eager = false,
 }: {
   src: string | null | undefined;
   className?: string;
   imgClassName?: string;
   style?: CSSProperties;
+  /** Load right away (above-the-fold art); everything else waits until it is near the screen. */
+  eager?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   return (
     <div className={`photo ${className}`} style={style}>
       {src && !failed ? (
-        <img className={imgClassName} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        <img
+          className={imgClassName}
+          src={src}
+          alt=""
+          loading={eager ? 'eager' : 'lazy'}
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+        />
       ) : null}
     </div>
   );

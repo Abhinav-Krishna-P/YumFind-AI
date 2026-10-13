@@ -76,6 +76,15 @@ export function Home() {
     return () => window.clearTimeout(id);
   }, []);
 
+  // Once we know where the user is, the map is the next stop: fetch its code while they type.
+  useEffect(() => {
+    if (!spot) return;
+    const warm = () => void import('@/pages/Dashboard');
+    const idle = (window as Window & { requestIdleCallback?: (fn: () => void) => number }).requestIdleCallback;
+    if (idle) idle(warm);
+    else window.setTimeout(warm, 1500);
+  }, [spot]);
+
   useEffect(() => {
     if (!foundAt) return;
     const id = window.setTimeout(() => setFoundAt(0), 2400);
@@ -145,10 +154,11 @@ export function Home() {
   else if (typing) bubble = { kind: 'typing', text: 'Type a dish. I read the newest reviews.' };
 
   return (
-    <main className="min-h-dvh overflow-hidden bg-white" style={{ animation: 'fadeIn .5s ease backwards' }}>
-      <header className="sticky top-0 z-30 flex items-center gap-4 border-b border-line bg-white/80 px-[clamp(18px,4vw,56px)] py-4 backdrop-blur-[14px]">
-        <Logo />
-        <div className="ml-auto flex items-center gap-2.5">
+    <main className="min-h-dvh overflow-x-clip bg-white" style={{ animation: 'fadeIn .5s ease backwards' }}>
+      <header className="safe-top sticky top-0 z-30 border-b border-line bg-white/80 backdrop-blur-[14px]">
+        <div className="flex items-center gap-3 px-[clamp(16px,4vw,56px)] py-3 sm:gap-4 sm:py-4">
+        <Logo size={34} text={21} />
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5">
           {session ? (
             <button
               onClick={() => navigate('/profile')}
@@ -157,26 +167,27 @@ export function Home() {
               <span className="grid h-[30px] w-[30px] place-items-center rounded-full font-display text-sm font-bold" style={{ background: 'var(--grad-coin)' }}>
                 {initial}
               </span>
-              Profile
+              <span className="max-[359px]:hidden">Profile</span>
             </button>
           ) : (
             <>
               <button
                 onClick={() => navigate('/signup')}
-                className="cursor-pointer border-none bg-transparent px-3 py-2.5 text-[15px] font-semibold text-ink transition-colors hover:text-tomato"
+                className="cursor-pointer border-none bg-transparent px-2.5 py-2.5 text-[15px] font-semibold text-ink transition-colors hover:text-tomato max-[379px]:hidden sm:px-3"
               >
                 Sign up
               </button>
-              <button onClick={() => navigate('/login')} className="btn-primary px-[22px] py-[11px] hover:-translate-y-0.5">
+              <button onClick={() => navigate('/login')} className="btn-primary px-4 py-2.5 hover:-translate-y-0.5 sm:px-[22px] sm:py-[11px]">
                 Log in
               </button>
             </>
           )}
         </div>
+        </div>
       </header>
 
-      <section className="mx-auto grid max-w-[1320px] grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-center gap-[clamp(32px,5vw,72px)] px-[clamp(18px,4vw,56px)] pb-10 pt-[clamp(32px,5vw,64px)]">
-        <div className="flex max-w-[600px] flex-col gap-[22px]">
+      <section className="mx-auto grid max-w-[1320px] grid-cols-[repeat(auto-fit,minmax(min(100%,440px),1fr))] items-center gap-[clamp(28px,5vw,72px)] px-[clamp(16px,4vw,56px)] pb-10 pt-[clamp(24px,5vw,64px)]">
+        <div className="flex min-w-0 max-w-[600px] flex-col gap-[18px] sm:gap-[22px]">
           <span
             className="inline-flex items-center gap-2 self-start rounded-full bg-blush py-[7px] pl-2 pr-3.5 text-[13px] font-bold text-tomato-deep"
             style={{ animation: 'fadeUp .6s ease backwards' }}
@@ -186,7 +197,7 @@ export function Home() {
             </span>
             Not just nearby. Matched to your taste.
           </span>
-          <h1 className="m-0 font-display text-[clamp(46px,6.4vw,84px)] font-bold leading-none tracking-[-.025em] [text-wrap:balance]">
+          <h1 className="m-0 font-display text-[clamp(40px,11vw,84px)] font-bold leading-none tracking-[-.025em] [text-wrap:balance]">
             {HEADLINE.map((word, i) => (
               <span key={word} className="inline-block" style={{ animation: `blurIn .8s cubic-bezier(.2,.7,.2,1) ${0.05 + i * 0.07}s backwards` }}>
                 {word}&nbsp;
@@ -212,7 +223,7 @@ export function Home() {
               taste.
             </span>
           </h1>
-          <p className="m-0 max-w-[480px] text-lg leading-relaxed text-muted [text-wrap:pretty]" style={{ animation: 'fadeUp .7s ease .5s backwards' }}>
+          <p className="m-0 max-w-[480px] text-base leading-relaxed text-muted [text-wrap:pretty] sm:text-lg" style={{ animation: 'fadeUp .7s ease .5s backwards' }}>
             Google Maps lists everything around you. YumFindAI picks what fits you: it reads this month's reviews for your dish, finds reviewers who eat like you, reads the menu prices, and can even start from a photo of a dish.
           </p>
           {spot ? (
@@ -238,7 +249,7 @@ export function Home() {
                 className="flex items-center gap-2 rounded-[20px] bg-white p-2"
                 style={{ boxShadow: '0 18px 50px rgba(28,26,31,.10),0 0 0 1px #f1edf2' }}
               >
-                <Search className="ml-3 flex-none text-faint" size={20} strokeWidth={2.5} />
+                <Search className="ml-2 flex-none text-faint sm:ml-3" size={20} strokeWidth={2.5} />
                 <input
                   value={craving}
                   onChange={(event) => setCraving(event.target.value)}
@@ -250,11 +261,12 @@ export function Home() {
                 />
                 <button
                   type="submit"
-                  className="btn-primary flex-none px-[22px] py-3.5"
+                  aria-label="Find food"
+                  className="btn-primary h-12 flex-none px-4 sm:px-[22px]"
                   onPointerEnter={() => setGoHover(true)}
                   onPointerLeave={() => setGoHover(false)}
                 >
-                  Find food
+                  <span className="max-[379px]:hidden">Find food</span>
                   <ArrowRight size={16} strokeWidth={2.75} />
                 </button>
               </form>
@@ -274,24 +286,24 @@ export function Home() {
         <HeroArt mood={mood} lookAt={input.point} bubble={bubble} />
       </section>
 
-      <section className="mx-auto max-w-[1320px] px-[clamp(18px,4vw,56px)] pb-20 pt-6">
+      <section className="mx-auto max-w-[1320px] px-[clamp(16px,4vw,56px)] pb-14 pt-6 sm:pb-20">
         <p className="m-0 text-[13px] font-extrabold uppercase tracking-[.1em] text-tomato">What a map app can't do</p>
         <h2 className="m-0 mt-1 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-[-.015em]">Not another map. A match for your taste.</h2>
         <p className="m-0 mt-1.5 max-w-[680px] text-base text-muted">
           A map shows what is near. YumFindAI works out what is right for you, and shows the evidence.
         </p>
-        <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2">
           {FEATURES.map((feature, i) => (
             <article
               key={feature.id}
-              className="flex flex-col rounded-[26px] bg-white p-5 sm:p-6"
+              className="flex flex-col rounded-[22px] bg-white p-4 sm:rounded-[26px] sm:p-6"
               style={{ boxShadow: '0 0 0 1px #f1edf2, 0 18px 40px rgba(28,26,31,.06)', animation: `fadeUp .5s ease ${i * 80}ms backwards` }}
             >
               <div className="flex items-center gap-3">
                 <span className="grid h-11 w-11 flex-none place-items-center rounded-2xl text-white" style={{ background: 'var(--grad)' }}>
                   <feature.icon size={20} strokeWidth={2.5} />
                 </span>
-                <h3 className="m-0 font-display text-xl font-semibold leading-tight">{feature.title}</h3>
+                <h3 className="m-0 font-display text-lg font-semibold leading-tight sm:text-xl">{feature.title}</h3>
               </div>
               <p className="m-0 mt-3 text-[15px] leading-relaxed text-muted">{feature.text}</p>
               <div className="mt-4 flex-1 rounded-2xl bg-mist p-3.5" aria-hidden="true">
@@ -304,7 +316,7 @@ export function Home() {
 
 
       <footer className="border-t border-line">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-[clamp(18px,4vw,56px)] py-6">
+        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-[clamp(16px,4vw,56px)] py-6 pb-[max(24px,env(safe-area-inset-bottom))]">
           <Logo size={30} text={18} />
           <p className="m-0 text-sm font-medium text-muted">YumFindAI finds food with live Google Maps, reviews, web and directions data from SerpApi.</p>
         </div>
@@ -318,7 +330,7 @@ function FeaturePreview({ id }: { id: Feature['id'] }) {
   if (id === 'match') {
     return (
       <div className="flex gap-3 rounded-xl bg-white p-2.5">
-        <Photo src={foodImg('1563379091339-03b21ab4a4f8')} className="h-16 w-16 flex-none rounded-xl" />
+        <Photo src={foodImg('1563379091339-03b21ab4a4f8', 200)} className="h-16 w-16 flex-none rounded-xl" />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="truncate font-display text-[15px] font-semibold">Malabar Menu</span>
@@ -353,7 +365,7 @@ function FeaturePreview({ id }: { id: Feature['id'] }) {
   if (id === 'snap') {
     return (
       <div className="flex items-center gap-3">
-        <Photo src={foodImg('1668236543090-82eba5ee5976')} className="h-20 w-20 flex-none rounded-xl" />
+        <Photo src={foodImg('1668236543090-82eba5ee5976', 200)} className="h-20 w-20 flex-none rounded-xl" />
         <ArrowRight size={18} strokeWidth={2.75} className="flex-none text-faint" />
         <div className="min-w-0 rounded-xl bg-white p-2.5">
           <p className="m-0 flex items-center gap-1.5 text-[11px] font-bold text-muted">
@@ -396,7 +408,7 @@ function LocateStep({ locating, error, onLocate }: { locating: boolean; error: s
           <p className="m-0 text-[15px] font-bold text-ink">Where are you?</p>
           <p className="m-0 text-[13px] font-medium text-muted">Step 1 of 2, then tell YumFindAI what you're craving</p>
         </div>
-        <button type="button" onClick={onLocate} disabled={locating} className="btn-primary flex-none px-[22px] py-3.5 max-sm:w-full">
+        <button type="button" onClick={onLocate} disabled={locating} className="btn-primary h-12 flex-none px-[22px] max-sm:w-full">
           <LocateFixed size={16} strokeWidth={2.75} />
           {locating ? 'Finding you...' : 'Locate me'}
         </button>
@@ -425,7 +437,7 @@ function HeroArt({
   bubble: { kind: string; text: string };
 }) {
   return (
-    <div className="relative aspect-[1/1.02] w-full max-w-[560px] justify-self-center" style={{ animation: 'fadeIn 1s ease .15s backwards' }}>
+    <div className="relative aspect-[1/1.02] w-full max-w-[min(560px,92vw)] justify-self-center max-sm:max-w-[380px]" style={{ animation: 'fadeIn 1s ease .15s backwards' }}>
       <div
         className="absolute bottom-0 left-[8%] right-0 top-[4%] rounded-[40px]"
         style={{
@@ -435,16 +447,16 @@ function HeroArt({
       />
       <div className="dot-grid absolute bottom-0 left-[8%] right-0 top-[4%] rounded-[40px] opacity-60" />
       <div className="absolute left-0 top-[6%] aspect-square w-[24%]">
-        <Photo src={foodImg('1565299624946-b28f40a0ae38')} className="h-full w-full rounded-full" style={{ ...floatCircle, animation: 'bob 6s ease-in-out infinite' }} />
+        <Photo eager src={foodImg('1565299624946-b28f40a0ae38', 320)} className="h-full w-full rounded-full" style={{ ...floatCircle, animation: 'bob 6s ease-in-out infinite' }} />
       </div>
       <div className="absolute right-[-2%] top-[52%] aspect-square w-[22%]">
-        <Photo src={foodImg('1668236543090-82eba5ee5976')} className="h-full w-full rounded-full" style={{ ...floatCircle, animation: 'bob 7s ease-in-out 1s infinite' }} />
+        <Photo eager src={foodImg('1668236543090-82eba5ee5976', 320)} className="h-full w-full rounded-full" style={{ ...floatCircle, animation: 'bob 7s ease-in-out 1s infinite' }} />
       </div>
       <div className="absolute left-[19%] top-[15%] h-[76%] w-[66%]">
         <Mascot mood={mood} size="100%" follow lookAt={lookAt} />
       </div>
       <div
-        className="absolute right-[3%] top-[3%] max-w-[50%] rounded-2xl bg-white px-4 py-2.5 text-[14px] font-semibold leading-snug text-ink"
+        className="absolute right-[3%] top-[3%] max-w-[54%] rounded-2xl bg-white px-3 py-2 text-[13px] font-semibold leading-snug text-ink sm:max-w-[50%] sm:px-4 sm:py-2.5 sm:text-[14px]"
         style={{ boxShadow: '0 16px 36px rgba(28,26,31,.14)', animation: 'popIn .5s cubic-bezier(.2,1.4,.4,1) .6s backwards' }}
         aria-hidden="true"
       >

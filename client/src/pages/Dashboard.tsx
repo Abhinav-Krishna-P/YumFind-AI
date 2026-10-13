@@ -10,6 +10,7 @@ import { useSession } from '@/lib/session';
 import { readSpot, saveSpot } from '@/lib/spot';
 import { estimateDriveMin, parseDuration, timing, type Timing } from '@/lib/hours';
 import { distanceLabel, rupees } from '@/lib/utils';
+import { useAppHeight, useIsPhone } from '@/lib/media';
 import { BadgeCheck, BookOpen, Camera, Clock, ChevronDown, Heart, ChevronLeft, ChevronRight, ChevronUp, LocateFixed, MapPin, MessageCircle, Mic as MicIcon, Navigation, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -110,7 +111,13 @@ export function Dashboard() {
   const celebrating = useBeat(resultsAt, 2600);
   const chipCheer = useBeat(chipAt, 700);
   const cravingGaze = useInputGaze();
+  const phone = useIsPhone();
+  // On a phone the results sheet can fold down to its header, so the pins behind it show.
+  const [folded, setFolded] = useState(false);
   useTitle('Map');
+  useAppHeight();
+
+  useEffect(() => setFolded(false), [resultsAt]);
 
   useEffect(() => {
     if (!user) return;
@@ -331,7 +338,10 @@ export function Dashboard() {
   const chatVisible = chatOpen && Boolean(fingerprint) && (phase === 'ranking' || phase === 'place');
 
   return (
-    <main className={`relative h-dvh overflow-hidden bg-[#f3f1f4]${chatVisible ? ' chat-open' : ''}`}>
+    <main
+      className={`relative h-dvh overflow-hidden overscroll-none bg-[#f3f1f4]${chatVisible ? ' chat-open' : ''}`}
+      style={{ height: 'var(--app-height, 100dvh)' }}
+    >
       <MapCanvas
         user={user}
         places={mapPlaces}
@@ -341,15 +351,15 @@ export function Dashboard() {
         onSelect={(id) => (phase === 'ranking' || phase === 'place' ? openPlace(id) : undefined)}
       />
       <header
-        className="absolute left-4 right-4 top-4 z-20 flex items-center gap-3 rounded-[20px] bg-white/[.92] py-2.5 pl-3.5 pr-2.5 backdrop-blur-[12px]"
+        className="absolute left-3 right-3 top-[max(12px,env(safe-area-inset-top))] z-20 flex items-center gap-2 rounded-[20px] bg-white/[.92] py-2 pl-3 pr-2 backdrop-blur-[12px] sm:left-4 sm:right-4 sm:top-[max(16px,env(safe-area-inset-top))] sm:gap-3 sm:py-2.5 sm:pl-3.5 sm:pr-2.5"
         style={{ boxShadow: '0 12px 32px rgba(28,26,31,.12)', animation: 'fadeUp .5s ease backwards' }}
       >
-        <Logo size={34} text={20} />
-        <div className="flex min-w-0 flex-col border-l-[1.5px] border-line pl-3.5 leading-tight">
+        <Logo size={34} text={20} textClassName="max-sm:hidden" />
+        <div className="flex min-w-0 flex-1 flex-col border-l-[1.5px] border-line pl-3 leading-tight sm:flex-none sm:pl-3.5">
           <span className="text-[11px] font-semibold text-faint">Current location</span>
           <span className="flex items-center gap-[5px] overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold">
             <MapPin className="flex-none text-tomato" size={13} strokeWidth={2.75} />
-            {user ? placeLabel || 'Locating...' : dropMode ? 'Tap the map to set' : 'Not set yet'}
+            <span className="min-w-0 truncate">{user ? placeLabel || 'Locating...' : dropMode ? 'Tap the map to set' : 'Not set yet'}</span>
           </span>
         </div>
         {user ? (
@@ -358,7 +368,7 @@ export function Dashboard() {
             onClick={locate}
             aria-label="Locate me again"
             title="Locate me again"
-            className="grid h-9 w-9 flex-none cursor-pointer place-items-center rounded-full border-none bg-transparent text-muted hover:bg-mist hover:text-tomato"
+            className="grid h-10 w-10 flex-none cursor-pointer place-items-center rounded-full border-none bg-transparent text-muted hover:bg-mist hover:text-tomato active:bg-mist"
           >
             <LocateFixed size={17} strokeWidth={2.5} />
           </button>
@@ -366,22 +376,24 @@ export function Dashboard() {
         <button
           onClick={() => navigate('/profile')}
           aria-label="Profile"
-          className="ml-auto h-10 w-10 flex-none cursor-pointer rounded-full border-none font-display text-[17px] font-bold text-ink transition-[translate,transform] duration-300 hover:scale-[1.08]"
+          className="h-10 w-10 flex-none cursor-pointer rounded-full border-none font-display sm:ml-auto text-[17px] font-bold text-ink transition-[translate,transform] duration-300 hover:scale-[1.08]"
           style={{ background: 'var(--grad-coin)' }}
         >
           {initial}
         </button>
       </header>
 
-      <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center p-4${chatVisible ? ' md:pr-[432px]' : ''}`}>
+      <div
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pb-[max(16px,env(safe-area-inset-bottom))] sm:pt-4${chatVisible ? ' md:pr-[432px]' : ''}`}
+      >
         {phase === 'idle' ? (
           <div className="sheet max-w-[440px] overflow-hidden">
-            <div className="relative flex h-[136px] items-end justify-center overflow-hidden" style={{ background: 'linear-gradient(150deg,#ffd75e,#ffa91f)' }}>
+            <div className="relative flex h-[120px] items-end justify-center overflow-hidden sm:h-[136px]" style={{ background: 'linear-gradient(150deg,#ffd75e,#ffa91f)' }}>
               <div className="dot-grid absolute inset-0 opacity-80" />
-              <Mascot mood={greeting ? 'wave' : dropMode ? 'curious' : 'idle'} size={126} follow className="relative -mb-1" />
+              <Mascot mood={greeting ? 'wave' : dropMode ? 'curious' : 'idle'} size={phone ? 110 : 126} follow className="relative -mb-1" />
             </div>
-            <div className="px-[22px] pb-[22px] pt-5">
-              <h1 className="m-0 font-display text-[26px] font-semibold">{dropMode ? 'Drop a pin' : 'Locate yourself'}</h1>
+            <div className="px-4 pb-4 pt-4 sm:px-[22px] sm:pb-[22px] sm:pt-5">
+              <h1 className="m-0 font-display text-[22px] font-semibold sm:text-[26px]">{dropMode ? 'Drop a pin' : 'Locate yourself'}</h1>
               <p className="mb-0 mt-1 text-sm text-muted">
                 {dropMode ? 'Tap anywhere on the map to set where you are.' : 'YumFindAI only shows your position until you search.'}
               </p>
@@ -404,29 +416,30 @@ export function Dashboard() {
         ) : null}
 
         {phase === 'located' || phase === 'craving' ? (
-          <div className="sheet max-w-[600px] p-[22px]">
+          <div className="sheet max-w-[600px] p-4 sm:p-[22px]">
             <div className="flex items-center gap-3.5">
               <Mascot
                 mood={snap.status === 'working' ? 'searching' : snap.status === 'error' ? 'sad' : listening ? 'listening' : cravingGaze.focused ? 'curious' : 'idle'}
-                size={68}
+                size={phone ? 52 : 68}
                 follow
                 lookAt={cravingGaze.point}
                 steam={false}
                 className="flex-none"
               />
               <div className="min-w-0">
-                <p className="m-0 font-display text-2xl font-semibold">{headline}</p>
-                <p className="mb-0 mt-0.5 text-sm text-muted">{reason}</p>
+                <p className="m-0 font-display text-xl font-semibold sm:text-2xl">{headline}</p>
+                <p className="mb-0 mt-0.5 text-[13px] leading-snug text-muted sm:text-sm">{reason}</p>
               </div>
             </div>
-            <form onSubmit={(event) => void submitCraving(event)} className="mt-4 flex gap-2 rounded-[18px] bg-mist p-1.5" style={{ boxShadow: '0 0 0 1.5px #ece8ee' }}>
-              <Search className="my-auto ml-2.5 flex-none text-faint" size={19} strokeWidth={2.5} />
+            <form onSubmit={(event) => void submitCraving(event)} className="mt-3 flex gap-1.5 rounded-[18px] bg-mist p-1.5 sm:mt-4 sm:gap-2" style={{ boxShadow: '0 0 0 1.5px #ece8ee' }}>
+              <Search className="my-auto ml-2.5 flex-none text-faint max-sm:hidden" size={19} strokeWidth={2.5} />
               <input
                 placeholder="Mild chicken biryani, spicy beef fry..."
                 value={craving}
                 onChange={(event) => setCraving(event.target.value)}
                 aria-label="What are you craving?"
-                className="min-w-0 flex-1 border-none bg-transparent text-base font-medium text-ink outline-none"
+                enterKeyHint="search"
+                className="min-w-0 flex-1 border-none bg-transparent pl-2 text-base font-medium text-ink outline-none sm:pl-0"
                 {...cravingGaze.bind}
               />
               <Mic onText={setCraving} onListening={setListening} />
@@ -440,19 +453,20 @@ export function Dashboard() {
                   }
                 }}
               />
-              <button type="submit" className="btn-primary h-[46px] flex-none rounded-xl px-5 shadow-none">
-                Search
+              <button type="submit" aria-label="Search" className="btn-primary h-[46px] w-[46px] flex-none rounded-xl px-0 shadow-none sm:w-auto sm:px-5">
+                <Search size={18} strokeWidth={2.75} className="sm:hidden" />
+                <span className="max-sm:hidden">Search</span>
               </button>
             </form>
-            <div className="no-scrollbar mt-4 flex gap-3.5 overflow-x-auto pb-0.5">
+            <div className="no-scrollbar -mx-4 mt-3 flex snap-x scroll-px-4 gap-3 overflow-x-auto overscroll-x-contain px-4 pb-0.5 sm:mx-0 sm:scroll-px-0 sm:mt-4 sm:gap-3.5 sm:px-0">
               {CATEGORIES.map((category, i) => (
                 <button
                   key={category.label}
                   onClick={() => setCraving(category.label)}
-                  className="flex flex-none cursor-pointer flex-col items-center gap-1.5 border-none bg-transparent p-0 text-xs font-semibold text-ink-2 transition-transform duration-300 [transition-timing-function:var(--spring)] hover:-translate-y-1"
+                  className="flex flex-none snap-start cursor-pointer flex-col items-center gap-1.5 border-none bg-transparent p-0 text-xs font-semibold text-ink-2 transition-transform duration-300 [transition-timing-function:var(--spring)] hover:-translate-y-1"
                   style={{ animation: `fadeUp .4s ease ${i * 50}ms backwards` }}
                 >
-                  <Photo src={category.img} className="h-[58px] w-[58px] rounded-full border-[3px] border-white bg-peach" style={{ boxShadow: '0 0 0 2px #ffd0b0' }} />
+                  <Photo src={category.img} eager className="h-[52px] w-[52px] sm:h-[58px] sm:w-[58px] rounded-full border-[3px] border-white bg-peach" style={{ boxShadow: '0 0 0 2px #ffd0b0' }} />
                   {category.label}
                 </button>
               ))}
@@ -475,12 +489,12 @@ export function Dashboard() {
         ) : null}
 
         {phase === 'constraints' ? (
-          <div className="sheet max-h-[56vh] max-w-[600px] overflow-auto p-[22px]">
+          <div className="sheet max-h-[62dvh] max-w-[600px] overflow-auto p-4 sm:max-h-[56dvh] sm:p-[22px]">
             <div className="flex items-center gap-3">
-              <Mascot mood={chipCheer ? 'happy' : 'idle'} size={56} follow steam={false} className="flex-none" />
-              <p className="m-0 min-w-0 flex-1 font-display text-2xl font-semibold">How do you like it?</p>
-              <button type="button" onClick={() => setPhase('located')} className="flex-none cursor-pointer border-none bg-transparent p-0 text-sm font-bold text-tomato hover:underline">
-                Change craving
+              <Mascot mood={chipCheer ? 'happy' : 'idle'} size={phone ? 44 : 56} follow steam={false} className="flex-none" />
+              <p className="m-0 min-w-0 flex-1 font-display text-xl font-semibold sm:text-2xl">How do you like it?</p>
+              <button type="button" onClick={() => setPhase('located')} className="flex-none cursor-pointer border-none bg-transparent px-1 py-2 text-sm font-bold text-tomato hover:underline">
+                Change<span className="max-sm:hidden"> craving</span>
               </button>
             </div>
             <ChipGroup title="Radius">
@@ -504,18 +518,20 @@ export function Dashboard() {
                 </Chip>
               ))}
             </ChipGroup>
-            <button onClick={() => void search()} className="btn-primary mt-5 h-[52px] w-full text-base">
-              Read reviews
-            </button>
+            <div className="sticky bottom-0 -mx-4 -mb-4 mt-3 bg-white px-4 pb-4 pt-2 sm:static sm:m-0 sm:mt-5 sm:p-0">
+              <button onClick={() => void search()} className="btn-primary h-[52px] w-full text-base">
+                Read reviews
+              </button>
+            </div>
           </div>
         ) : null}
 
         {phase === 'searching' ? (
-          <div className="sheet max-h-[60vh] max-w-[520px] overflow-auto p-[22px]">
+          <div className="sheet max-h-[60dvh] max-w-[520px] overflow-auto p-4 sm:p-[22px]">
             <div className="flex items-center gap-3.5">
-              <Mascot mood={agentMood(steps)} size={76} steam={false} className="flex-none" />
+              <Mascot mood={agentMood(steps)} size={phone ? 56 : 76} steam={false} className="flex-none" />
               <div className="min-w-0">
-                <p className="m-0 font-display text-[22px] font-semibold leading-tight">YumFindAI is on it</p>
+                <p className="m-0 font-display text-lg font-semibold leading-tight sm:text-[22px]">YumFindAI is on it</p>
                 <p className="m-0 text-[13px] font-medium text-muted">Choosing which Google data to pull, live through SerpApi.</p>
               </div>
             </div>
@@ -526,13 +542,24 @@ export function Dashboard() {
         ) : null}
 
         {phase === 'ranking' ? (
-          <div className="sheet min-w-0 max-w-[1220px] p-[18px]">
-            <div className="mx-1.5 mb-3.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="sheet min-w-0 max-w-[1220px] p-3 sm:p-[18px]">
+            {phone ? (
+              <button
+                type="button"
+                onClick={() => setFolded((value) => !value)}
+                aria-label={folded ? 'Show the results' : 'Fold the results to see the map'}
+                aria-expanded={!folded}
+                className="-mt-1 mb-1 flex w-full cursor-pointer justify-center border-none bg-transparent py-1.5"
+              >
+                <span className="h-1.5 w-10 rounded-full bg-line-2" />
+              </button>
+            ) : null}
+            <div className={`mx-1.5 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 ${folded ? '' : 'mb-3 sm:mb-3.5'}`}>
               <div className="flex min-w-0 items-center gap-3">
-                <Mascot mood={celebrating ? 'found' : 'idle'} size={60} follow steam={false} className="flex-none" />
+                {phone ? null : <Mascot mood={celebrating ? 'found' : 'idle'} size={60} follow steam={false} className="flex-none" />}
                 <ReviewReport headline={headline} places={ranked} />
               </div>
-              <div className="flex flex-none gap-2">
+              <div className="flex w-full flex-none gap-2 sm:w-auto">
               <button
                 type="button"
                 onClick={() => {
@@ -540,31 +567,31 @@ export function Dashboard() {
                   setSelectedId(null);
                   setPhase('located');
                 }}
-                className="btn-outline h-11 px-4"
+                className="btn-outline h-11 flex-1 whitespace-nowrap px-2 max-[359px]:text-[13px] sm:flex-none sm:px-4"
               >
                 <Search size={15} strokeWidth={2.5} />
                 New search
               </button>
-              <button className={`${chatOpen ? 'btn-primary shadow-none' : 'btn-outline'} h-11 flex-none px-4`} type="button" onClick={() => setChatOpen((open) => !open)}>
+              <button className={`${chatOpen ? 'btn-primary shadow-none' : 'btn-outline'} h-11 flex-1 whitespace-nowrap px-2 max-[359px]:text-[13px] sm:flex-none sm:px-4`} type="button" onClick={() => setChatOpen((open) => !open)}>
                 <MessageCircle size={15} strokeWidth={2.5} />
-                {chatOpen ? 'Chat open' : 'Ask about these'}
+                {chatOpen ? 'Chat open' : phone ? 'Ask AI' : 'Ask about these'}
               </button>
               </div>
             </div>
-            <ResultCarousel places={ranked} onOpen={openPlace} />
-            {trace.length ? (
+            {folded ? null : <ResultCarousel places={ranked} onOpen={openPlace} />}
+            {trace.length && !folded ? (
               <div className="mx-1.5 mt-2">
                 <button
                   type="button"
                   onClick={() => setShowTrace((open) => !open)}
-                  className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent p-0 text-xs font-bold text-tomato hover:underline"
+                  className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent px-0 py-1.5 text-left text-xs font-bold text-tomato hover:underline"
                 >
-                  <LogoMark size={16} />
+                  <LogoMark size={16} className="flex-none" />
                   How YumFindAI decided{costLabel(usage) ? ` · ${costLabel(usage)}` : ''}
                   {showTrace ? <ChevronUp size={13} strokeWidth={2.75} /> : <ChevronDown size={13} strokeWidth={2.75} />}
                 </button>
                 {showTrace ? (
-                  <div className="mt-2 max-h-[26vh] overflow-auto rounded-2xl bg-mist px-4 py-3" style={{ animation: 'fadeUp .3s ease backwards' }}>
+                  <div className="mt-2 max-h-[26dvh] overflow-auto overscroll-contain rounded-2xl bg-mist px-4 py-3" style={{ animation: 'fadeUp .3s ease backwards' }}>
                     <AgentTrace steps={trace.map((row, index) => ({ id: index + 1, tool: row.tool, say: row.say, status: 'done', summary: row.summary }))} compact />
                   </div>
                 ) : null}
@@ -578,16 +605,16 @@ export function Dashboard() {
         ) : null}
 
         {phase === 'error' ? (
-          <div className="sheet max-w-[460px] p-[22px]">
+          <div className="sheet max-w-[460px] p-4 sm:p-[22px]">
             <div className="flex items-center gap-3.5">
               <Mascot mood="sad" size={64} steam={false} className="flex-none" />
               <p className="m-0 text-[15px] font-semibold">{error}</p>
             </div>
             <div className="mt-3.5 flex gap-2">
-              <button onClick={locate} className="btn-primary h-[46px] rounded-xl px-5 shadow-none">
+              <button onClick={locate} className="btn-primary h-[46px] flex-1 rounded-xl px-5 shadow-none sm:flex-none">
                 Try locate
               </button>
-              <button onClick={() => { if (user) setDropMode(false); setPhase(user ? 'located' : 'idle'); }} className="btn-outline h-[46px] px-5 text-[15px]">
+              <button onClick={() => { if (user) setDropMode(false); setPhase(user ? 'located' : 'idle'); }} className="btn-outline h-[46px] flex-1 px-5 text-[15px] sm:flex-none">
                 Back to map
               </button>
             </div>
@@ -596,7 +623,7 @@ export function Dashboard() {
       </div>
 
       {chatVisible ? (
-        <div className="absolute inset-x-2 bottom-2 top-[26%] z-30 flex md:inset-x-auto md:bottom-4 md:right-4 md:top-[92px] md:w-[400px]">
+        <div className="absolute inset-x-2 bottom-[max(8px,env(safe-area-inset-bottom))] top-[max(22%,calc(env(safe-area-inset-top)+80px))] z-30 flex md:inset-x-auto md:bottom-4 md:right-4 md:top-[92px] md:w-[400px]">
           <ChatPanel
             key={fingerprint}
             fingerprint={fingerprint}
@@ -643,7 +670,7 @@ function ReviewReport({ headline, places }: { headline: string; places: Place[] 
   const read = totals.positive + totals.neutral + totals.negative;
   return (
     <div className="min-w-0">
-      <p className="m-0 font-display text-[22px] font-semibold">{headline || 'Review report'}</p>
+      <p className="m-0 font-display text-xl font-semibold sm:text-[22px]">{headline || 'Review report'}</p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-muted">
         <span>{read ? `${read} reviews, last 3 months` : 'No recent reviews'}</span>
         {(['positive', 'neutral', 'negative'] as const).map((tone) => (
@@ -668,15 +695,15 @@ function ResultCarousel({ places, onOpen }: { places: Place[]; onOpen: (id: stri
 
   return (
     <div className="relative">
-      <button type="button" aria-label="Previous restaurants" onClick={() => move(-1)} className="btn-round absolute left-0 top-1/2 z-[2] -mt-[21px]">
+      <button type="button" aria-label="Previous restaurants" onClick={() => move(-1)} className="btn-round absolute left-0 top-1/2 z-[2] -mt-[21px] max-sm:hidden">
         <ChevronLeft size={18} strokeWidth={2.75} />
       </button>
-      <div ref={scroller} className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-[52px] pb-2.5 pt-1.5">
+      <div ref={scroller} className="no-scrollbar flex snap-x snap-mandatory scroll-px-1 gap-3 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-2.5 pt-1.5 sm:scroll-px-[52px] sm:gap-4 sm:px-[52px]">
         {places.map((place, index) => (
           <ResultCard key={place.id} place={place} rank={index + 1} onOpen={() => onOpen(place.id)} />
         ))}
       </div>
-      <button type="button" aria-label="Next restaurants" onClick={() => move(1)} className="btn-round absolute right-0 top-1/2 z-[2] -mt-[21px]">
+      <button type="button" aria-label="Next restaurants" onClick={() => move(1)} className="btn-round absolute right-0 top-1/2 z-[2] -mt-[21px] max-sm:hidden">
         <ChevronRight size={18} strokeWidth={2.75} />
       </button>
     </div>
@@ -692,11 +719,11 @@ function ResultCard({ place, rank, onOpen }: { place: Place; rank: number; onOpe
   return (
     <div
       data-card
-      className="flex w-[260px] flex-none snap-start flex-col overflow-hidden rounded-[22px] bg-white transition-[transform,box-shadow] duration-300 ease-out hover:shadow-[0_20px_44px_rgba(28,26,31,.16)]"
+      className="flex w-[min(260px,calc(100vw-96px))] flex-none snap-start flex-col overflow-hidden rounded-[22px] bg-white transition-[transform,box-shadow] duration-300 ease-out hover:shadow-[0_20px_44px_rgba(28,26,31,.16)]"
       style={{ boxShadow: '0 0 0 1px #f1edf2', animation: `cardIn .55s cubic-bezier(.2,1.1,.4,1) ${(rank - 1) * 70}ms backwards` }}
     >
       <button type="button" onClick={onOpen} className="zoom-host block cursor-pointer border-none bg-transparent p-0 text-left font-[inherit] text-inherit">
-        <div className="relative h-[130px]">
+        <div className="relative h-[108px] sm:h-[130px]">
           <Photo src={place.thumbnail} className="h-full w-full" imgClassName="zoom-img" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[60%]" style={{ background: 'linear-gradient(to top,rgba(20,12,10,.7),transparent)' }} />
           <span
@@ -710,7 +737,7 @@ function ResultCard({ place, rank, onOpen }: { place: Place; rank: number; onOpe
         </div>
         <div className="px-3.5 pt-3">
           <h2 className="m-0 overflow-hidden text-ellipsis whitespace-nowrap font-display text-lg font-semibold">{place.name}</h2>
-          {place.address ? <p className="m-0 mt-px overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium text-muted">{place.address}</p> : null}
+          {place.address ? <p className="m-0 mt-px overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium text-muted max-sm:hidden">{place.address}</p> : null}
           <p className={`mb-0 mt-2 text-[13px] leading-[1.45] text-ink-2 ${expanded ? '' : 'line-clamp-2'}`}>{review}</p>
           <Dishes dishes={place.dishes} small />
           <TwinsBadge twins={place.twins} />
@@ -721,12 +748,12 @@ function ResultCard({ place, rank, onOpen }: { place: Place; rank: number; onOpe
         <button
           type="button"
           onClick={() => setExpanded((open) => !open)}
-          className="mx-3.5 mt-1 cursor-pointer self-start border-none bg-transparent p-0 text-xs font-bold text-tomato hover:underline"
+          className="mx-3.5 mt-1 cursor-pointer self-start border-none bg-transparent px-0 py-1 text-xs font-bold text-tomato hover:underline"
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
       ) : null}
-      <div className="mt-auto flex items-center justify-between gap-2 px-3.5 pb-3.5 pt-3 text-[11px] font-bold">
+      <div className="mt-auto flex items-center justify-between gap-2 px-3.5 pb-3 pt-2.5 text-[11px] font-bold sm:pb-3.5 sm:pt-3">
         <div className="flex gap-1.5">
           <span className="rounded-full px-2 py-[3px]" style={{ background: TONES.positive.bg, color: TONES.positive.fg }}>
             {counts.positive} positive
@@ -735,7 +762,7 @@ function ResultCard({ place, rank, onOpen }: { place: Place; rank: number; onOpe
             {counts.negative} negative
           </span>
         </div>
-        <span className="font-semibold text-faint">Last 3 months</span>
+        <span className="font-semibold text-faint max-sm:hidden">Last 3 months</span>
       </div>
     </div>
   );
@@ -883,26 +910,26 @@ function PlaceCard({ place, craving, routeNote, driveMin, onClose }: { place: Pl
     .join(' · ');
 
   return (
-    <div className="sheet relative max-h-[66vh] max-w-[480px] overflow-hidden" style={{ boxShadow: '0 24px 60px rgba(28,26,31,.2)' }}>
+    <div className="sheet relative max-h-[74dvh] max-w-[480px] overflow-hidden sm:max-h-[66dvh]" style={{ boxShadow: '0 24px 60px rgba(28,26,31,.2)' }}>
       <button
         type="button"
         aria-label="Back to results"
         onClick={onClose}
-        className="absolute right-3.5 top-3.5 z-[3] grid h-[38px] w-[38px] cursor-pointer place-items-center rounded-full border-none bg-white/95 text-ink transition-transform duration-[250ms] [transition-timing-function:var(--spring)] hover:scale-[1.08]"
+        className="absolute right-3 top-3 z-[3] grid h-10 w-10 sm:right-3.5 sm:top-3.5 cursor-pointer place-items-center rounded-full border-none bg-white/95 text-ink transition-transform duration-[250ms] [transition-timing-function:var(--spring)] hover:scale-[1.08]"
         style={{ boxShadow: '0 6px 16px rgba(0,0,0,.18)' }}
       >
         <X size={16} strokeWidth={2.75} />
       </button>
-      <div className="max-h-[66vh] overflow-auto">
-        <div className="relative h-[190px]">
+      <div className="max-h-[74dvh] overflow-auto overscroll-contain sm:max-h-[66dvh]">
+        <div className="relative h-[150px] sm:h-[190px]">
           <Photo src={place.thumbnail} className="h-full w-full" style={{ animation: 'fadeIn .5s ease backwards' }} />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(to top,rgba(20,12,10,.82) 0%,rgba(20,12,10,.1) 60%,transparent)' }} />
-          <div className="absolute bottom-4 left-5 right-5 text-white" style={{ animation: 'fadeUp .5s ease .1s backwards' }}>
+          <div className="absolute bottom-3.5 left-4 right-4 text-white sm:bottom-4 sm:left-5 sm:right-5" style={{ animation: 'fadeUp .5s ease .1s backwards' }}>
             <p className="m-0 text-[11px] font-extrabold uppercase tracking-[.12em] text-sun">Review report</p>
-            <h2 className="m-0 mt-0.5 font-display text-[30px] font-bold leading-[1.1]">{place.name}</h2>
+            <h2 className="m-0 mt-0.5 font-display text-[24px] font-bold leading-[1.1] sm:text-[30px]">{place.name}</h2>
           </div>
         </div>
-        <div className="px-5 pb-6 pt-4">
+        <div className="px-4 pb-5 pt-4 sm:px-5 sm:pb-6">
           <div className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-2">
             {place.rating != null ? <span className="rating-badge rounded-lg px-[9px] py-1 text-[13px]">★ {place.rating.toFixed(1)}</span> : null}
             {meta ? <span>{meta}</span> : null}
@@ -939,7 +966,7 @@ function PlaceCard({ place, craving, routeNote, driveMin, onClose }: { place: Pl
                 className="rounded-2xl px-2 py-3 text-center transition-transform duration-[250ms] [transition-timing-function:var(--spring)] hover:-translate-y-1"
                 style={{ background: TONES[tone].bg, color: TONES[tone].fg, animation: `fadeUp .45s ease ${0.05 + i * 0.07}s backwards` }}
               >
-                <div className="font-display text-[28px] font-bold leading-[1.1]">{counts[tone]}</div>
+                <div className="font-display text-[24px] font-bold leading-[1.1] sm:text-[28px]">{counts[tone]}</div>
                 <div className="text-xs font-bold">{TONES[tone].label}</div>
               </div>
             ))}

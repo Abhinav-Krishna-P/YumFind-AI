@@ -1,6 +1,13 @@
 import * as maplibregl from 'maplibre-gl';
 import type { GeoJSONSource } from 'maplibre-gl';
 import { useEffect, useRef } from 'react';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
+
+// MapLibre looks for its tile worker next to its own file, but Vite bundles that file elsewhere
+// (into .vite/deps in dev, a hashed chunk in a build), so the worker 404s and no map tiles draw.
+// Point it at the worker file Vite actually serves.
+maplibregl.setWorkerUrl(workerUrl);
 
 export type RoutePoint = { lat: number; lng: number };
 
@@ -65,12 +72,28 @@ function placePin(place: MapPoint, index: number, animate: boolean) {
   return root;
 }
 
+/**
+ * Map padding that keeps pins clear of the floating header and the bottom sheet.
+ * `sheet` is the share of the map height the sheet covers; it is capped so a short phone
+ * screen always keeps some map to show the pins in.
+ */
+function sheetPadding(map: maplibregl.Map, sheet: number) {
+  const { clientWidth: width, clientHeight: height } = map.getContainer();
+  const phone = width < 640;
+  // The floating header plus a pin's height (pins hang above their point), so no pin hides under it.
+  const top = phone ? 140 : 150;
+  const side = phone ? 28 : 60;
+  const bottom = Math.max(40, Math.min(Math.round(height * sheet), height - top - 140));
+  return { top, bottom, left: side, right: side };
+}
+
 function fitPlaces(map: maplibregl.Map, user: RoutePoint | null, places: MapPoint[]) {
   if (!user || !places.length) return;
   const bounds = new maplibregl.LngLatBounds();
   bounds.extend([user.lng, user.lat]);
   for (const place of places) bounds.extend([place.lng, place.lat]);
-  map.fitBounds(bounds, { padding: { top: 110, bottom: 440, left: 60, right: 60 }, duration: 1100, maxZoom: 15 });
+  const tall = map.getContainer().clientHeight;
+  map.fitBounds(bounds, { padding: sheetPadding(map, tall < 760 ? 0.5 : Math.min(0.55, 440 / tall)), duration: 1100, maxZoom: 15 });
 }
 
 export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: Props) {
@@ -99,14 +122,25 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
       center: [77.5946, 12.9716],
       zoom: 11,
       attributionControl: { compact: true },
+      // 3x phone screens would draw 9x the pixels of a desktop; 2x looks the same and is far cheaper.
+      pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+      // The map stays north-up and flat: two-finger gestures only zoom, so pinching never tilts or spins it.
+      dragRotate: false,
+      pitchWithRotate: false,
+      touchPitch: false,
+      fadeDuration: 150,
     });
+    map.touchZoomRotate.disableRotation();
+    map.keyboard.disableRotation();
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     const resize = () => map.resize();
     map.on('load', () => {
       ready.current = true;
       resize();
     });
-    window.addEventListener('resize', resize);
+    // Follows every size change of the map box: rotation, the browser bar, the on-screen keyboard.
+    const observer = new ResizeObserver(() => resize());
+    observer.observe(holder.current);
     map.on('click', (event) => {
       if (!dropRef.current) return;
       onDropRef.current(event.lngLat.lat, event.lngLat.lng);
@@ -131,7 +165,7 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
     requestAnimationFrame(resize);
     return () => {
       cancelAnimationFrame(routeRaf.current);
-      window.removeEventListener('resize', resize);
+      observer.disconnect();
       map.remove();
       mapRef.current = null;
     };
@@ -146,7 +180,7 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
         center: [user.lng, user.lat],
         zoom: 14.6,
         duration: 1400,
-        padding: { top: 60, bottom: 260, left: 0, right: 0 },
+        padding: { top: 60, bottom: Math.min(260, Math.round(map.getContainer().clientHeight * 0.4)), left: 0, right: 0 },
         essential: true,
       });
     };
@@ -236,7 +270,7 @@ export function MapCanvas({ user, places, route, dropMode, onDrop, onSelect }: P
       const bounds = new maplibregl.LngLatBounds();
       for (const point of pts) bounds.extend(point as [number, number]);
       map.fitBounds(bounds, {
-        padding: { top: 110, bottom: Math.round(window.innerHeight * 0.64), left: 60, right: 60 },
+        padding: sheetPadding(map, 0.64),
         duration: 900,
         maxZoom: 15.5,
       });

@@ -1,12 +1,15 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { Mascot } from '@/components/mascot/Mascot';
 import { supabase } from '@/lib/supabase';
-import { Dashboard } from '@/pages/Dashboard';
 import { Home } from '@/pages/Home';
-import { Login } from '@/pages/Login';
-import { Profile } from '@/pages/Profile';
-import { Signup } from '@/pages/Signup';
+
+// Only the landing page ships in the first download. The map page pulls in MapLibre (~1 MB),
+// so phones on the home page never pay for it until they open the map.
+const Dashboard = lazy(() => import('@/pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const Profile = lazy(() => import('@/pages/Profile').then((m) => ({ default: m.Profile })));
+const Login = lazy(() => import('@/pages/Login').then((m) => ({ default: m.Login })));
+const Signup = lazy(() => import('@/pages/Signup').then((m) => ({ default: m.Signup })));
 
 function Loading() {
   return (
@@ -35,12 +38,14 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
-      <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-      <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
-    </Routes>
+    <Suspense fallback={<Loading />}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+        <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
+      </Routes>
+    </Suspense>
   );
 }

@@ -99,7 +99,7 @@ export function MenuSection({ placeId, craving }: { placeId: string; craving: st
             <div className="no-scrollbar -mx-1 mt-2.5 flex gap-2 overflow-x-auto px-1 pb-1">
               {menu.photos.map((photo, index) => (
                 <a key={photo.thumb} href={photo.image} target="_blank" rel="noreferrer" className="flex-none" aria-label={`Open menu photo ${index + 1}`}>
-                  <img src={photo.thumb} alt="" referrerPolicy="no-referrer" className="h-20 w-20 rounded-xl object-cover" />
+                  <img src={photo.thumb} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-20 w-20 rounded-xl object-cover" />
                 </a>
               ))}
             </div>
@@ -144,7 +144,7 @@ export function MenuSection({ placeId, craving }: { placeId: string; craving: st
                 <button
                   type="button"
                   onClick={() => setAll((value) => !value)}
-                  className="mt-2 cursor-pointer border-none bg-transparent p-0 text-xs font-bold text-tomato hover:underline"
+                  className="mt-1 cursor-pointer border-none bg-transparent px-0 py-1.5 text-xs font-bold text-tomato hover:underline"
                 >
                   {all ? 'Show less' : `Show all ${filtered.length} dishes`}
                 </button>

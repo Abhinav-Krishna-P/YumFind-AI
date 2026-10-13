@@ -47,7 +47,7 @@ export function Login() {
         value={password}
         onChange={(event) => setPassword(event.target.value)}
       />
-      <label className="flex cursor-pointer select-none items-center gap-2.5 text-sm font-semibold text-ink-2">
+      <label className="flex cursor-pointer select-none flex-wrap items-center gap-x-2.5 gap-y-0.5 py-1 text-sm font-semibold text-ink-2">
         <input
           type="checkbox"
           checked={remember}

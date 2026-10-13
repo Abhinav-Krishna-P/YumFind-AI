@@ -76,6 +76,11 @@ body,
   margin: 0;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -86,14 +91,39 @@ body {
   line-height: 1.5;
   background: #fff;
   color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+/* No double-tap-to-zoom delay on anything tappable. */
+a,
+button,
+input,
+label,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+/* iOS zooms the page into any field under 16px; keep phone fields at 16px. */
+@media (max-width: 767px), (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 a {
   color: var(--color-tomato-deep);
 }
 
-a:hover {
-  color: var(--color-tomato);
+@media (hover: hover) {
+  a:hover {
+    color: var(--color-tomato);
+  }
 }
 
 input::placeholder {
@@ -152,8 +182,10 @@ input::placeholder {
   transition: translate 0.3s var(--ease-out), transform 0.2s, box-shadow 0.2s;
 }
 
-.btn-primary:hover {
-  box-shadow: 0 14px 28px rgba(255, 61, 84, 0.4);
+@media (hover: hover) {
+  .btn-primary:hover {
+    box-shadow: 0 14px 28px rgba(255, 61, 84, 0.4);
+  }
 }
 
 .btn-primary:active {
@@ -179,9 +211,11 @@ input::placeholder {
   transition: translate 0.3s var(--ease-out), border-color 0.2s, color 0.2s;
 }
 
-.btn-outline:hover {
-  border-color: var(--color-tomato);
-  color: var(--color-tomato);
+@media (hover: hover) {
+  .btn-outline:hover {
+    border-color: var(--color-tomato);
+    color: var(--color-tomato);
+  }
 }
 
 .btn-round {
@@ -198,9 +232,11 @@ input::placeholder {
   transition: transform 0.2s, color 0.2s;
 }
 
-.btn-round:hover {
-  transform: scale(1.1);
-  color: var(--color-tomato);
+@media (hover: hover) {
+  .btn-round:hover {
+    transform: scale(1.1);
+    color: var(--color-tomato);
+  }
 }
 
 .btn-round:active {
@@ -239,13 +275,25 @@ input::placeholder {
   animation: fadeUp 0.4s ease backwards;
 }
 
-.chip:hover {
-  transform: translateY(-2px);
-  border-color: var(--color-tomato);
+@media (hover: hover) {
+  .chip:hover {
+    transform: translateY(-2px);
+    border-color: var(--color-tomato);
+  }
 }
 
 .chip:active {
   transform: scale(0.94);
+}
+
+@media (pointer: coarse) {
+  .chip {
+    padding: 11px 16px;
+  }
+
+  .pill-link {
+    padding: 9px 14px;
+  }
 }
 
 .chip[aria-pressed="true"] {
@@ -266,14 +314,23 @@ input::placeholder {
   transition: all 0.2s;
 }
 
-.pill-link:hover {
-  border-color: var(--color-tomato);
-  color: var(--color-tomato);
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .pill-link:hover {
+    border-color: var(--color-tomato);
+    color: var(--color-tomato);
+    transform: translateY(-2px);
+  }
+}
+
+/* Space for the notch and the home indicator on phones (viewport-fit=cover). */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
 }
 
 /* Floating sheets on the map */
 .sheet {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   pointer-events: auto;
   width: 100%;
   background: #fff;
@@ -311,8 +368,10 @@ input::placeholder {
   transition: transform 0.6s var(--ease-out);
 }
 
-.zoom-host:hover .zoom-img {
-  transform: scale(1.08);
+@media (hover: hover) {
+  .zoom-host:hover .zoom-img {
+    transform: scale(1.08);
+  }
 }
 
 /* Map */
@@ -330,7 +389,14 @@ input::placeholder {
 }
 
 .map-shell .maplibregl-ctrl-top-right {
-  top: 84px;
+  top: calc(84px + env(safe-area-inset-top));
+}
+
+/* Phones pinch to zoom; the +/- buttons only crowd the small map. */
+@media (max-width: 639px) {
+  .map-shell .maplibregl-ctrl-top-right {
+    display: none;
+  }
 }
 
 .map-shell .maplibregl-ctrl-group {
@@ -359,9 +425,14 @@ input::placeholder {
   transition: transform 0.3s var(--spring);
 }
 
-.place-pin:hover .place-pin-inner,
 .place-pin.selected .place-pin-inner {
   transform: scale(1.2) translateY(-4px);
+}
+
+@media (hover: hover) {
+  .place-pin:hover .place-pin-inner {
+    transform: scale(1.2) translateY(-4px);
+  }
 }
 
 .place-pin-label {
@@ -381,9 +452,11 @@ input::placeholder {
   pointer-events: none;
 }
 
-.place-pin:hover .place-pin-label {
-  opacity: 1;
-  transform: translateX(0) scale(1);
+@media (hover: hover) {
+  .place-pin:hover .place-pin-label {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
 }
 }
 

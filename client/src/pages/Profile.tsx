@@ -73,17 +73,18 @@ export function Profile() {
 
   return (
     <main className="min-h-dvh bg-mist" style={{ animation: 'fadeIn .4s ease backwards' }}>
-      <header className="sticky top-0 z-30 border-b border-line bg-white/[.85] backdrop-blur-[14px]">
-        <div className="mx-auto flex max-w-[1080px] items-center gap-4 px-[clamp(18px,4vw,40px)] py-3.5">
+      <header className="safe-top sticky top-0 z-30 border-b border-line bg-white/[.85] backdrop-blur-[14px]">
+        <div className="mx-auto flex max-w-[1080px] items-center gap-3 px-[clamp(16px,4vw,40px)] py-3 sm:gap-4 sm:py-3.5">
           <Logo size={34} text={20} />
           <Link to="/dashboard" className="btn-outline ml-auto h-10 px-4 no-underline hover:text-tomato">
             <MapIcon size={15} strokeWidth={2.5} />
-            Back to map
+            <span className="max-[359px]:hidden">Back to map</span>
+            <span className="min-[360px]:hidden">Map</span>
           </Link>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1080px] items-start gap-6 px-[clamp(18px,4vw,40px)] py-8 md:grid-cols-[340px_1fr]">
+      <div className="mx-auto grid max-w-[1080px] items-start gap-4 px-[clamp(16px,4vw,40px)] pb-[max(32px,env(safe-area-inset-bottom))] pt-5 sm:gap-6 sm:py-8 md:grid-cols-[340px_1fr]">
         <aside className="flex flex-col gap-4" style={{ animation: 'fadeUp .5s ease backwards' }}>
           <section className="overflow-hidden rounded-[22px] bg-white" style={{ boxShadow: '0 0 0 1px #f1edf2' }}>
             <div className="relative h-20" style={{ background: 'linear-gradient(135deg,#ff7a3d,#ff3d54)' }}>
@@ -91,7 +92,7 @@ export function Profile() {
                 <Mascot mood="idle" greet size={92} outline follow steam={false} shadow={false} />
               </div>
             </div>
-            <div className="px-6 pb-6">
+            <div className="px-5 pb-5 sm:px-6 sm:pb-6">
               <div className="relative z-10 -mt-10 h-20 w-20 rounded-full bg-white p-1" style={{ boxShadow: '0 8px 20px rgba(28,26,31,.12)' }}>
                 {avatar ? (
                   <img className="h-full w-full rounded-full object-cover" src={avatar} alt="" />
@@ -103,20 +104,20 @@ export function Profile() {
               </div>
               <h1 className="m-0 mt-3 break-words font-display text-[26px] font-bold leading-tight">{name}</h1>
               <p className="m-0 mt-0.5 break-all text-sm font-medium text-muted">{email}</p>
-              <button onClick={() => void signOut()} className="btn-outline mt-5 h-10 w-full">
+              <button onClick={() => void signOut()} className="btn-outline mt-5 h-11 w-full">
                 <LogOut size={15} strokeWidth={2.5} />
                 Sign out
               </button>
             </div>
           </section>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <Stat label="Searches" value={searches} />
             <Stat label="Places opened" value={opened} />
           </div>
         </aside>
 
-        <section className="rounded-[22px] bg-white p-6" style={{ boxShadow: '0 0 0 1px #f1edf2', animation: 'fadeUp .5s ease .08s backwards' }}>
+        <section className="rounded-[22px] bg-white p-4 sm:p-6" style={{ boxShadow: '0 0 0 1px #f1edf2', animation: 'fadeUp .5s ease .08s backwards' }}>
           <h2 className="m-0 font-display text-[22px] font-semibold">Recent visits</h2>
           <p className="m-0 mt-0.5 text-sm text-muted">Places you opened on the map.</p>
           {visits.length === 0 ? (
@@ -127,7 +128,7 @@ export function Profile() {
           ) : (
             <ul className="m-0 mt-4 list-none divide-y divide-line p-0">
               {visits.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE).map((visit) => (
-                <li key={visit.id} className="flex items-center gap-4 py-3">
+                <li key={visit.id} className="flex items-center gap-3 py-3 sm:gap-4">
                   {visit.thumbnail ? (
                     <Photo src={visit.thumbnail} className="h-12 w-12 flex-none rounded-xl" />
                   ) : (
@@ -150,19 +151,20 @@ export function Profile() {
           )}
           {visits.length > PAGE_SIZE ? (
             <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3">
-              <button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} className="btn-outline h-9 px-3 text-[13px] disabled:cursor-default disabled:opacity-40">
-                <ChevronLeft size={15} strokeWidth={2.5} /> Previous
+              <button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0} aria-label="Previous page" className="btn-outline h-10 px-3 text-[13px] disabled:cursor-default disabled:opacity-40">
+                <ChevronLeft size={15} strokeWidth={2.5} /> <span className="max-sm:hidden">Previous</span>
               </button>
               <span className="text-[13px] font-semibold text-muted">
-                Page {page + 1} of {Math.ceil(visits.length / PAGE_SIZE)} · {visits.length} places
+                Page {page + 1} of {Math.ceil(visits.length / PAGE_SIZE)}<span className="max-sm:hidden"> · {visits.length} places</span>
               </span>
               <button
                 type="button"
                 onClick={() => setPage((value) => Math.min(Math.ceil(visits.length / PAGE_SIZE) - 1, value + 1))}
                 disabled={(page + 1) * PAGE_SIZE >= visits.length}
-                className="btn-outline h-9 px-3 text-[13px] disabled:cursor-default disabled:opacity-40"
+                aria-label="Next page"
+                className="btn-outline h-10 px-3 text-[13px] disabled:cursor-default disabled:opacity-40"
               >
-                Next <ChevronRight size={15} strokeWidth={2.5} />
+                <span className="max-sm:hidden">Next</span> <ChevronRight size={15} strokeWidth={2.5} />
               </button>
             </div>
           ) : null}
@@ -174,9 +176,9 @@ export function Profile() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-[22px] bg-white px-5 py-4" style={{ boxShadow: '0 0 0 1px #f1edf2' }}>
+    <div className="rounded-[22px] bg-white px-4 py-3.5 sm:px-5 sm:py-4" style={{ boxShadow: '0 0 0 1px #f1edf2' }}>
       <p className="m-0 text-[13px] font-semibold text-muted">{label}</p>
-      <p className="m-0 mt-1 font-display text-[36px] font-bold leading-none text-ink">{value}</p>
+      <p className="m-0 mt-1 font-display text-[30px] font-bold leading-none text-ink sm:text-[36px]">{value}</p>
     </div>
   );
 }
