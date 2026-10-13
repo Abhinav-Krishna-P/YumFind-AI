@@ -5,7 +5,9 @@
     "dev": "concurrently -n server,client -c red,blue \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm run dev --prefix client",
-    "typecheck": "npm run typecheck --prefix server && npm run typecheck --prefix client"
+    "typecheck": "npm run typecheck --prefix server && npm run typecheck --prefix client",
+    "build": "npm ci --prefix client && npm run build --prefix client && npm ci --prefix server",
+    "start": "npm start --prefix server"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

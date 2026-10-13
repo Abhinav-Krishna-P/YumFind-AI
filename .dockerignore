@@ -1,0 +1,8 @@
+# Secrets come from the host's environment variables, never from the image.
+.env
+*.local
+**/node_modules
+**/dist
+.git
+docs
+.cursor

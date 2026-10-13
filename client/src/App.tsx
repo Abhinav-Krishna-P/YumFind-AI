@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { Mascot } from '@/components/mascot/Mascot';
+import { PwaNotices } from '@/components/Pwa';
 import { supabase } from '@/lib/supabase';
 import { Home } from '@/pages/Home';
 
@@ -38,6 +39,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
+    <>
+    <PwaNotices />
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -47,5 +50,6 @@ export default function App() {
         <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
       </Routes>
     </Suspense>
+    </>
   );
 }

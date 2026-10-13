@@ -35,4 +35,6 @@ export const env = {
   redisUrl: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
   jev: process.env.TYPESAFE_AI_API_KEY || '',
   jevModel: process.env.JEV_MODEL || 'jev-latest',
+  /** The built web app (client/dist). When it exists, this server serves the site and the API from one origin. */
+  webDist: process.env.WEB_DIST || resolve(process.cwd(), '../client/dist'),
 };

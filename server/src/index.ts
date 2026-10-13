@@ -1,4 +1,7 @@
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { existsSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -205,7 +208,27 @@ app.post('/api/visits', rateLimit('visits', 60), async (c) => {
   return c.json({ ok: true });
 });
 
+// In production the same server hands out the built web app, so the site and its API share one
+// origin (no CORS, no second deploy). Locally the Vite dev server does this instead.
+if (existsSync(resolve(env.webDist, 'index.html'))) {
+  const root = relative(process.cwd(), env.webDist) || '.';
+  const isApi = (path: string) => path.startsWith('/api/');
+  app.use('*', async (c, next) => {
+    await next();
+    if (isApi(c.req.path)) return;
+    // Hashed build files never change; everything else (index.html, sw.js, the manifest) must be
+    // re-checked on every visit, or installed apps would never see a new version.
+    const hashed = c.req.path.startsWith('/assets/') || /^\/workbox-[\w-]+\.js$/.test(c.req.path);
+    c.header('Cache-Control', hashed ? 'public, max-age=31536000, immutable' : 'no-cache');
+  });
+  app.use('*', (c, next) => (isApi(c.req.path) ? next() : serveStatic({ root })(c, next)));
+  // Deep links such as /dashboard load the app, which then routes in the browser.
+  app.get('*', (c, next) => (isApi(c.req.path) ? next() : serveStatic({ root, path: 'index.html' })(c, next)));
+  console.log(`Serving the web app from ${env.webDist}`);
+}
+
 // Local by default: the API is only reachable from this machine (Vite proxies to it).
+// Hosted, set API_HOST=0.0.0.0 so the platform's proxy can reach it.
 serve({ fetch: app.fetch, port: env.port, hostname: env.host }, () => {
   console.log(
     `YumFindAI API on ${env.host}:${env.port} serp=${flag(env.serp)} gemini=${flag(env.gemini)} supabase=${flag(env.supabaseUrl)} service-role=${flag(env.serviceRole)}`,

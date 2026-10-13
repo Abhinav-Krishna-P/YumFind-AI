@@ -1,5 +1,6 @@
 import { Logo, Photo, foodImg, useTitle } from '@/components/brand';
 import { Mascot, useInputGaze, type MascotMood } from '@/components/mascot/Mascot';
+import { InstallBanner } from '@/components/Pwa';
 import { useSession } from '@/lib/session';
 import { currentPosition, placeNameFor, readSpot, saveSpot, type Spot } from '@/lib/spot';
 import { ArrowRight, BookOpen, Camera, Check, Heart, LocateFixed, Search, Sparkles } from 'lucide-react';
@@ -321,6 +322,7 @@ export function Home() {
           <p className="m-0 text-sm font-medium text-muted">YumFindAI finds food with live Google Maps, reviews, web and directions data from SerpApi.</p>
         </div>
       </footer>
+      <InstallBanner />
     </main>
   );
 }
