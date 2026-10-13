@@ -1,4 +1,4 @@
-<p align="center"><img src="client/public/og-image.png" alt="YumFindAI: where to eat, picked from fresh reviews" width="840"></p>
+
 
 <h1 align="center">YumFindAI</h1>
 
