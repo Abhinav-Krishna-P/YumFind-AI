@@ -1,12 +1,24 @@
-
-
 <h1 align="center">YumFindAI</h1>
+
+<p align="center">
+  <a href="https://serpapi.github.io/BuiltWithSerpApi/projects/yumfind-ai/">
+    <img src="https://img.shields.io/badge/Built%20with-SerpApi-1f6feb?style=for-the-badge" alt="Built with SerpApi: validated project">
+  </a>
+  <a href="https://serpapi.github.io/BuiltWithSerpApi/projects/yumfind-ai/">
+    <img src="https://img.shields.io/badge/SerpApi%20Hackathon%202026-Validated%20Project-2ea44f?style=for-the-badge" alt="SerpApi Hackathon 2026 validated project">
+  </a>
+</p>
 
 <p align="center"><b>Not just what's nearby: an AI agent that matches food to <i>your</i> taste, using what people said this month.</b></p>
 
 <p align="center">
-SerpApi India Hackathon 2026 · Track: <b>Travel &amp; Local Discovery</b> · built as an <b>AI agent</b> on live Google data
+SerpApi India Hackathon 2026 · Track: <b>Travel &amp; Local Discovery</b> · built as an <b>AI agent</b> on live Google data<br>
+🏆 <b>Selected as a validated project</b> on <a href="https://serpapi.github.io/BuiltWithSerpApi/projects/yumfind-ai/">Built with SerpApi</a>
 </p>
+
+## Recognition
+
+YumFindAI was selected as a **validated project** in the SerpApi India Hackathon 2026 and is listed on SerpApi's [Built with SerpApi](https://serpapi.github.io/BuiltWithSerpApi/projects/yumfind-ai/) showcase.
 
 ## Demo
 
@@ -34,6 +46,7 @@ Then you can **chat about the results**: *"Which one is least spicy?"* … *"Doe
 
 ## Contents
 
+- [Recognition](#recognition)
 - [Demo](#demo)
 - [What it does](#what-it-does)
 - [How the agent works](#how-the-agent-works)

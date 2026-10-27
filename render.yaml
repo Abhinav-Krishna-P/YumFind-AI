@@ -1,0 +1,34 @@
+# Render Blueprint: one free web service that builds the Dockerfile and serves the app + API.
+# Render passes these environment variables to the Docker build too, so the VITE_ values reach the web app.
+services:
+  - type: web
+    name: yumfindai
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/health
+    domains:
+      - yumfindai.abhinavkp.codes
+    envVars:
+      # Secrets: Render asks for each of these when you create the Blueprint.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TYPESAFE_AI_API_KEY
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      # Free Redis from Upstash (rediss://...). Leave empty to keep chat memory in the server process.
+      - key: REDIS_URL
+        sync: false
+      - key: API_HOST
+        value: 0.0.0.0
